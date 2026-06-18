@@ -9,22 +9,33 @@ namespace GuideAssistant.Views;
 
 public sealed partial class ToolbarWindow : Window
 {
-    private readonly MainWindow _mainWindow;
+    private MainWindow _mainWindow = default!;
     private readonly TabManager _tabManager;
     private readonly BookmarkService _bookmarkService;
-    private bool _isBookmarked;
 
-    public ToolbarWindow(MainWindow mainWindow, TabManager tabManager, BookmarkService bookmarkService)
+    public ToolbarWindow(TabManager tabManager, BookmarkService bookmarkService)
     {
         InitializeComponent();
-        _mainWindow = mainWindow;
         _tabManager = tabManager;
         _bookmarkService = bookmarkService;
 
         InitializeWindow();
-        InitializeTabBar();
+    }
+
+    /// <summary>
+    /// Sets the MainWindow reference after both windows have been constructed.
+    /// This breaks the DI circular dependency: MainWindow → ToolbarWindow → MainWindow.
+    /// </summary>
+    public void SetMainWindow(MainWindow mainWindow)
+    {
+        _mainWindow = mainWindow;
+        InitializeTabList();
         InitializeNavBar();
         SubscribeToMainWindowEvents();
+
+        // Auto-load the active tab's page on startup
+        if (_tabManager.ActiveTab != null)
+            _mainWindow.NavigateToUrl(_tabManager.ActiveTab.Url);
     }
 
     private void InitializeWindow()
@@ -34,7 +45,7 @@ public sealed partial class ToolbarWindow : Window
         titleBar.ButtonBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
         titleBar.ButtonInactiveBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 800, Height = 220 });
+        AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 800, Height = 320 });
         var presenter = AppWindow.Presenter as OverlappedPresenter;
         if (presenter != null)
             presenter.IsAlwaysOnTop = true;
@@ -43,40 +54,76 @@ public sealed partial class ToolbarWindow : Window
         Log.Information("ToolbarWindow initialized");
     }
 
-    private void InitializeTabBar()
+    private void InitializeTabList()
     {
-        TabBarControl.TabManager = _tabManager;
+        _tabManager.Tabs.CollectionChanged += (s, e) => RefreshTabList();
+        RefreshTabList();
+        SelectActiveTab();
+    }
 
-        TabBarControl.NewTabRequested += () =>
+    private void RefreshTabList()
+    {
+        TabListView.ItemsSource = null;
+        TabListView.ItemsSource = _tabManager.Tabs;
+    }
+
+    private void SelectActiveTab()
+    {
+        if (_tabManager.ActiveTab != null)
+            TabListView.SelectedItem = _tabManager.ActiveTab;
+    }
+
+    private void TabListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (TabListView.SelectedItem is TabItem tab)
         {
-            var tab = _tabManager.AddTab();
-            TabBarControl.Refresh();
+            _tabManager.ActiveTab = tab;
             _mainWindow.NavigateToUrl(tab.Url);
-            LoadUrlIntoNavBar(tab.Url);
-        };
+            NavBarControl.SetUrl(tab.Url);
+        }
+    }
 
-        TabBarControl.TabCloseRequested += (id) =>
+    private void TabFavoriteBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is TabItem tab)
         {
-            _tabManager.CloseTab(id);
-            TabBarControl.Refresh();
-        };
-
-        TabBarControl.TabSelected += (id) =>
-        {
-            var tab = _tabManager.Tabs.FirstOrDefault(t => t.Id == id);
-            if (tab != null)
+            if (_bookmarkService.IsUrlBookmarked(tab.Url))
             {
-                _tabManager.ActiveTab = tab;
-                _mainWindow.NavigateToUrl(tab.Url);
-                LoadUrlIntoNavBar(tab.Url);
-                UpdateBookmarkState();
+                ShowDialog("提示", "已收藏过该页面");
             }
-        };
+            else
+            {
+                _bookmarkService.QuickAdd(tab.Title, tab.Url);
+                ShowDialog("收藏", "已添加到收藏夹 ✓");
+            }
+            RefreshTabList();
+            SelectActiveTab();
+        }
+    }
 
-        _tabManager.Tabs.CollectionChanged += (s, e) => TabBarControl.Refresh();
+    private void TabCloseBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is TabItem tab)
+        {
+            _tabManager.CloseTab(tab.Id);
+            RefreshTabList();
+            SelectActiveTab();
 
-        // Initial refresh
-        TabBarControl.Refresh();
+            if (_tabManager.ActiveTab != null)
+            {
+                _mainWindow.NavigateToUrl(_tabManager.ActiveTab.Url);
+                NavBarControl.SetUrl(_tabManager.ActiveTab.Url);
+            }
+        }
+    }
+
+    private void NewTabBtn_Click(object sender, RoutedEventArgs e)
+    {
+        var tab = _tabManager.AddTab();
+        RefreshTabList();
+        SelectActiveTab();
+        _mainWindow.NavigateToUrl(tab.Url);
+        NavBarControl.SetUrl(tab.Url);
     }
 
     private void InitializeNavBar()
@@ -90,7 +137,6 @@ public sealed partial class ToolbarWindow : Window
         NavBarControl.BackRequested += () =>
         {
             _mainWindow.NavigateBack();
-            // Update URL bar after navigation
             var currentUrl = _mainWindow.GetCurrentUrl();
             if (currentUrl != null) NavBarControl.SetUrl(currentUrl);
         };
@@ -116,7 +162,6 @@ public sealed partial class ToolbarWindow : Window
             else
             {
                 _mainWindow.AddBookmark();
-                _isBookmarked = true;
                 NavBarControl.SetBookmarkState(true);
                 ShowDialog("收藏", "已添加到收藏夹 ✓");
             }
@@ -129,7 +174,6 @@ public sealed partial class ToolbarWindow : Window
         if (initialUrl != null)
         {
             NavBarControl.SetUrl(initialUrl);
-            UpdateBookmarkState();
         }
     }
 
@@ -138,54 +182,14 @@ public sealed partial class ToolbarWindow : Window
         _mainWindow.UrlChanged += (url) =>
         {
             NavBarControl.SetUrl(url);
-            UpdateBookmarkState();
+            RefreshTabList();
+            SelectActiveTab();
         };
 
         _mainWindow.TitleChanged += (title) =>
         {
-            // TabBar refreshes via TabManager collection change
+            RefreshTabList();
         };
-
-        _mainWindow.LoadingStateChanged += (isLoading) =>
-        {
-            // Could update a loading indicator if desired
-        };
-    }
-
-    private void LoadUrlIntoNavBar(string url)
-    {
-        NavBarControl.SetUrl(url);
-        UpdateBookmarkState();
-    }
-
-    private void UpdateBookmarkState()
-    {
-        _isBookmarked = _mainWindow.IsCurrentUrlBookmarked();
-        NavBarControl.SetBookmarkState(_isBookmarked);
-    }
-
-    private void CloseTabBtn_Click(object sender, RoutedEventArgs e)
-    {
-        _tabManager.CloseCurrentTab();
-        TabBarControl.Refresh();
-    }
-
-    private void BookmarkBtn_Click(object sender, RoutedEventArgs e)
-    {
-        var url = _mainWindow.GetCurrentUrl();
-        if (string.IsNullOrEmpty(url)) return;
-
-        if (_bookmarkService.IsUrlBookmarked(url))
-        {
-            ShowDialog("提示", "已收藏过该页面");
-        }
-        else
-        {
-            _mainWindow.AddBookmark();
-            _isBookmarked = true;
-            NavBarControl.SetBookmarkState(true);
-            ShowDialog("收藏", "已添加到收藏夹 ✓");
-        }
     }
 
     private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)

@@ -31,12 +31,6 @@ public sealed partial class TabBar : UserControl
         if (sender is Border border && border.DataContext is TabItem tab)
         {
             TabSelected?.Invoke(tab.Id);
-            // Handle close button tap
-            if (e.OriginalSource is Button btn && btn.Content?.ToString() == "✕")
-            {
-                TabCloseRequested?.Invoke(tab.Id);
-                e.Handled = true;
-            }
         }
     }
 

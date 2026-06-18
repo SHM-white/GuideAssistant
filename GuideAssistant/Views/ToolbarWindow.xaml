@@ -13,44 +13,93 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <Grid RowSpacing="0">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-        <!-- TabBar -->
-        <controls:TabBar x:Name="TabBarControl" Grid.Row="0" />
+        <!-- Left: Vertical Tab List -->
+        <Grid Grid.Column="0" Background="{ThemeResource SystemChromeMediumLowColor}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-        <!-- NavigationBar -->
-        <controls:NavigationBar x:Name="NavBarControl" Grid.Row="1" />
+            <ListView x:Name="TabListView" Grid.Row="0"
+                      SelectionMode="Single"
+                      SelectionChanged="TabListView_SelectionChanged">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Padding="8,6" ColumnSpacing="4" Height="36">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
 
-        <!-- Quick actions row -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="8,4" Spacing="6">
-            <Button x:Name="CloseTabBtn" Content="✕ 关闭标签" FontSize="12" Height="28"
-                    Padding="10,0" Background="Transparent" BorderThickness="0"
-                    Click="CloseTabBtn_Click" />
-            <Button x:Name="BookmarkBtn" Content="☆ 收藏" FontSize="12" Height="28"
-                    Padding="10,0" Background="Transparent" BorderThickness="0"
-                    Click="BookmarkBtn_Click" />
-            <AutoSuggestBox x:Name="SearchBox" PlaceholderText="搜索收藏夹..."
-                            Width="180" Height="28" FontSize="12"
+                            <TextBlock Text="{Binding Title}"
+                                       FontSize="12"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+
+                            <Button Grid.Column="1" Width="28" Height="28"
+                                    Background="Transparent" BorderThickness="0"
+                                    Padding="2" VerticalAlignment="Center"
+                                    Click="TabFavoriteBtn_Click">
+                                <SymbolIcon x:Name="TabFavIcon" Symbol="OutlineStar" />
+                            </Button>
+
+                            <Button Grid.Column="2" Width="28" Height="28"
+                                    Background="Transparent" BorderThickness="0"
+                                    Padding="2" VerticalAlignment="Center"
+                                    Click="TabCloseBtn_Click">
+                                <SymbolIcon Symbol="Cancel" />
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!-- New Tab button -->
+            <Button Grid.Row="1" Height="32" Margin="4"
+                    Background="Transparent" BorderThickness="0"
+                    HorizontalAlignment="Stretch"
+                    Click="NewTabBtn_Click">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <SymbolIcon Symbol="Add" />
+                    <TextBlock Text="新标签页" FontSize="12" Margin="4,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Right: Navigation + Search -->
+        <Grid Grid.Column="1" RowSpacing="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <controls:NavigationBar x:Name="NavBarControl" Grid.Row="0" />
+
+            <AutoSuggestBox x:Name="SearchBox" Grid.Row="1"
+                            PlaceholderText="搜索收藏夹..."
+                            Height="30" FontSize="12" Margin="8,4"
                             QuerySubmitted="SearchBox_QuerySubmitted" />
-        </StackPanel>
 
-        <!-- Bookmark results list -->
-        <ListView Grid.Row="3" x:Name="BookmarkResultsList" Margin="8,0"
-                  Visibility="Collapsed" SelectionChanged="BookmarkResults_SelectionChanged">
-            <ListView.ItemTemplate>
-                <DataTemplate>
-                    <StackPanel Margin="4">
-                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding Url}" FontSize="11" Opacity="0.7" />
-                    </StackPanel>
-                </DataTemplate>
-            </ListView.ItemTemplate>
-        </ListView>
+            <ListView Grid.Row="2" x:Name="BookmarkResultsList" Margin="8,0"
+                      Visibility="Collapsed"
+                      SelectionChanged="BookmarkResults_SelectionChanged">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="4">
+                            <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Url}" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
     </Grid>
 </Window>

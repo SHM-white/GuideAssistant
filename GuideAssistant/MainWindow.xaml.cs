@@ -79,6 +79,7 @@ public sealed partial class MainWindow : Window
         try
         {
             _toolbarWindow = App.Services.GetRequiredService<ToolbarWindow>();
+            _toolbarWindow.SetMainWindow(this);
             _toolbarWindow.Activate();
         }
         catch (Exception ex)
@@ -91,8 +92,22 @@ public sealed partial class MainWindow : Window
     {
         var titleBar = AppWindow.TitleBar;
         titleBar.ExtendsContentIntoTitleBar = true;
-        titleBar.ButtonBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
-        titleBar.ButtonInactiveBackgroundColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
+        titleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
+
+        // Make system title bar elements fully transparent
+        var transparent = Windows.UI.Color.FromArgb(0, 0, 0, 0);
+        titleBar.ButtonBackgroundColor = transparent;
+        titleBar.ButtonForegroundColor = transparent;
+        titleBar.ButtonInactiveBackgroundColor = transparent;
+        titleBar.ButtonInactiveForegroundColor = transparent;
+        titleBar.ButtonHoverBackgroundColor = Windows.UI.Color.FromArgb(40, 255, 255, 255);
+        titleBar.ButtonHoverForegroundColor = Colors.White;
+        titleBar.ButtonPressedBackgroundColor = Windows.UI.Color.FromArgb(60, 255, 255, 255);
+        titleBar.ButtonPressedForegroundColor = Colors.White;
+
+        // Remove system title text and icon
+        AppWindow.Title = "";
+
         var presenter = AppWindow.Presenter as OverlappedPresenter;
         if (presenter != null)
             presenter.IsAlwaysOnTop = true;
@@ -303,20 +318,20 @@ public sealed partial class MainWindow : Window
     private void RestoreWindowState()
     {
         var state = _windowStateRepo.Get("MainWindow");
-        if (state != null)
+        if (state == null || AppWindow == null)
+            return;
+
+        try
         {
-            try
+            AppWindow.MoveAndResize(new Windows.Graphics.RectInt32
             {
-                AppWindow.MoveAndResize(new Windows.Graphics.RectInt32
-                {
-                    X = (int)state.X, Y = (int)state.Y,
-                    Width = (int)state.Width, Height = (int)state.Height
-                });
-                _windowManager.SetOpacity(_hwnd, state.Opacity);
-                TitleBarControl.OpacitySliderControl.Value = state.Opacity;
-            }
-            catch (Exception ex) { Log.Warning(ex, "Restore window state failed"); }
+                X = (int)state.X, Y = (int)state.Y,
+                Width = (int)state.Width, Height = (int)state.Height
+            });
+            _windowManager.SetOpacity(_hwnd, state.Opacity);
+            TitleBarControl.OpacitySliderControl.Value = state.Opacity;
         }
+        catch (Exception ex) { Log.Warning(ex, "Restore window state failed"); }
     }
 
     private void SaveWindowState()

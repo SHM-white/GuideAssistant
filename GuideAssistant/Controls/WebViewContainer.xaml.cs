@@ -13,6 +13,7 @@ namespace GuideAssistant.Controls;
 
 public sealed partial class WebViewContainer : UserControl
 {
+    private static bool _webViewMissingShown;
     private Microsoft.UI.Xaml.Controls.WebView2? _webView;
     private TabManager? _tabManager;
 
@@ -63,51 +64,17 @@ public sealed partial class WebViewContainer : UserControl
         }
         catch (COMException ex) when (ex.HResult == unchecked((int)0x800F1000))
         {
-            Log.Error(ex, "WebView2 runtime is not installed");
-            _ = ShowWebView2MissingDialogAsync();
+            if (!_webViewMissingShown)
+            {
+                _webViewMissingShown = true;
+                Log.Error(ex, "WebView2 runtime not installed");
+                Application.Current.Exit();
+            }
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Failed to load URL: {Url}", url);
         }
-    }
-
-    private async Task ShowWebView2MissingDialogAsync()
-    {
-        // Wait for the control to be in the visual tree
-        while (XamlRoot == null)
-            await Task.Delay(100);
-
-        var dialog = new ContentDialog
-        {
-            Title = "WebView2 运行时未安装",
-            Content = "GuideAssistant 需要 WebView2 运行时才能显示网页内容。\n\n请点击下方按钮下载并安装 WebView2 运行时，然后重新启动应用。",
-            PrimaryButtonText = "下载 WebView2 运行时",
-            CloseButtonText = "关闭应用",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot
-        };
-
-        var result = await dialog.ShowAsync();
-        if (result == ContentDialogResult.Primary)
-        {
-            try
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    UseShellExecute = true,
-                    FileName = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-                };
-                System.Diagnostics.Process.Start(psi);
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Failed to open WebView2 download link");
-            }
-        }
-
-        // Close the application regardless of choice
-        Application.Current.Exit();
     }
 
     private void SetupWebView(Microsoft.UI.Xaml.Controls.WebView2 wv, TabItem tab)
@@ -153,6 +120,13 @@ window.__gv_player = {
     }
 };";
         _ = wv.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(playerScript);
+
+        // Prevent new window popups — navigate in same WebView
+        wv.CoreWebView2.NewWindowRequested += (s, e) =>
+        {
+            e.Handled = true;
+            wv.CoreWebView2.Navigate(e.Uri);
+        };
 
         // Set up container attribute for CSS
         wv.DefaultBackgroundColor = Microsoft.UI.Colors.Black;
