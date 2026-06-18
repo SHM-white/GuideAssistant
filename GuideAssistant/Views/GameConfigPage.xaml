@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="GuideAssistant.Views.GameConfigPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="游戏辅助器配置" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12" />
+
+        <!-- Game list -->
+        <ListView x:Name="GameList" Grid.Row="1" SelectionMode="Single">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Padding="8">
+                        <TextBlock Text="{Binding GameName}" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding GamePath}" FontSize="12" Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+            <Button x:Name="AddBtn" Content="+ 添加游戏" Click="AddBtn_Click" />
+            <Button x:Name="EditBtn" Content="编辑" Click="EditBtn_Click" />
+            <Button x:Name="DeleteBtn" Content="删除" Click="DeleteBtn_Click" />
+        </StackPanel>
+    </Grid>
+</Page>

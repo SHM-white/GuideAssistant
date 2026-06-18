@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="GuideAssistant.Controls.TitleBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Height="32">
+
+    <Grid Background="{ThemeResource SystemChromeLowColor}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!-- App Icon + Title (Drag region) -->
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+            <TextBlock Text="🎮" FontSize="16" VerticalAlignment="Center" />
+            <TextBlock Text="GuideAssistant" FontSize="13" FontWeight="SemiBold"
+                       Margin="8,0,0,0" VerticalAlignment="Center"
+                       Foreground="{ThemeResource SystemControlForegroundBaseHighBrush}" />
+        </StackPanel>
+
+        <!-- Spacer (drag region) -->
+        <Grid Grid.Column="1" />
+
+        <!-- Window buttons -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal">
+            <!-- Opacity slider -->
+            <Slider x:Name="OpacitySlider" Width="80" Height="32" VerticalAlignment="Center"
+                    Minimum="0.2" Maximum="1.0" Value="0.9" StepFrequency="0.05"
+                    Visibility="Collapsed" x:FieldModifier="public" />
+            <Button x:Name="OpacityBtn" Content="🔊" FontSize="13" Width="46" Height="32"
+                    Background="Transparent" BorderThickness="0"
+                    Click="OpacityBtn_Click" />
+
+            <Button x:Name="MinimizeBtn" Content="─" FontSize="13" Width="46" Height="32"
+                    Background="Transparent" BorderThickness="0"
+                    Click="MinimizeBtn_Click" />
+            <Button x:Name="MaximizeBtn" Content="□" FontSize="13" Width="46" Height="32"
+                    Background="Transparent" BorderThickness="0"
+                    Click="MaximizeBtn_Click" />
+            <Button x:Name="CloseBtn" Content="✕" FontSize="14" Width="46" Height="32"
+                    Background="Transparent" BorderThickness="0"
+                    Click="CloseBtn_Click" />
+        </StackPanel>
+    </Grid>
+</UserControl>

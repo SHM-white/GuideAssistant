@@ -1,0 +1,13 @@
+global using System;
+global using System.Collections.Generic;
+global using System.Linq;
+global using System.Threading.Tasks;
+global using Microsoft.UI.Xaml;
+global using Microsoft.UI.Xaml.Controls;
+global using Microsoft.UI.Xaml.Media;
+global using Microsoft.UI.Xaml.Shapes;
+global using Microsoft.UI;
+global using Microsoft.UI.Windowing;
+global using Windows.Graphics;
+global using Windows.UI;
+global using WinRT.Interop;

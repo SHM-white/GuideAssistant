@@ -10,10 +10,10 @@ public class Database
 
     public Database()
     {
-        var dbPath = Path.Combine(
+        var dbPath = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "GuideAssistant", "data.db");
-        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(dbPath)!);
         _connectionString = $"Data Source={dbPath}";
     }
 
