@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:GuideAssistant"
     xmlns:controls="using:GuideAssistant.Controls"
+    xmlns:models="using:GuideAssistant.Models"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -15,12 +16,107 @@
     </Window.SystemBackdrop>
 
     <Grid x:Name="RootGrid">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="32" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+        <!-- WebView fills entire window -->
+        <controls:WebViewContainer x:Name="WebViewControl" />
 
-        <controls:TitleBar x:Name="TitleBarControl" Grid.Row="0" />
-        <controls:WebViewContainer x:Name="WebViewControl" Grid.Row="1" />
+        <!-- Ultra-thin visual title bar (top edge) -->
+        <Border x:Name="TitleBarBorder"
+                Height="6"
+                VerticalAlignment="Top"
+                Background="{ThemeResource SystemChromeLowColor}" />
+
+        <!-- Floating window control buttons (top-right overlay) -->
+        <StackPanel x:Name="WindowButtonsPanel"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,8,0,0">
+            <Slider x:Name="OpacitySlider" Width="80" Height="24"
+                    VerticalAlignment="Center" Margin="0,0,4,0"
+                    Minimum="0.2" Maximum="1.0" Value="0.9" StepFrequency="0.05"
+                    Visibility="Collapsed" />
+            <Button x:Name="OpacityBtn" Width="36" Height="24"
+                    Background="Transparent" BorderThickness="0"
+                    Opacity="0.5" Padding="0">
+                <SymbolIcon Symbol="Setting" />
+            </Button>
+            <Button x:Name="MinimizeBtn" Content="─" FontSize="12" Width="36" Height="24"
+                    Background="Transparent" BorderThickness="0"
+                    Opacity="0.5" Padding="0" />
+            <Button x:Name="MaximizeBtn" Content="□" FontSize="12" Width="36" Height="24"
+                    Background="Transparent" BorderThickness="0"
+                    Opacity="0.5" Padding="0" />
+            <Button x:Name="CloseBtn" Content="✕" FontSize="12" Width="36" Height="24"
+                    Background="Transparent" BorderThickness="0"
+                    Opacity="0.5" Padding="0" />
+        </StackPanel>
+
+        <!-- Bookmark panel toggle button (always visible bottom-right) -->
+        <Button x:Name="BookmarksToggleBtn"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Width="28" Height="28" Margin="0,0,12,12"
+                Background="{ThemeResource SystemChromeMediumLowColor}"
+                BorderThickness="0"
+                CornerRadius="14"
+                Padding="0"
+                Click="BookmarksToggleBtn_Click"
+                ToolTipService.ToolTip="收藏夹">
+            <SymbolIcon x:Name="BookmarkToggleIcon" Symbol="OutlineStar" />
+        </Button>
+
+        <!-- Bookmarks Panel (bottom-right corner) -->
+        <Border x:Name="BookmarksPanel"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                MaxWidth="280" MaxHeight="320"
+                MinWidth="200" MinHeight="120"
+                Margin="8"
+                Background="{ThemeResource SystemChromeMediumLowColor}"
+                CornerRadius="8"
+                Padding="0"
+                Visibility="Collapsed">
+            <Grid RowSpacing="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Header -->
+                <Grid Grid.Row="0" Padding="10,8" ColumnSpacing="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="📁 收藏夹" FontWeight="SemiBold" FontSize="13"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Width="24" Height="24"
+                            Background="Transparent" BorderThickness="0" Padding="0"
+                            Click="BookmarksPanelClose_Click">
+                        <SymbolIcon Symbol="Cancel" />
+                    </Button>
+                </Grid>
+
+                <!-- TreeView for grouped bookmarks -->
+                <TreeView x:Name="BookmarksTreeView" Grid.Row="1"
+                          Margin="4,0,4,8"
+                          SelectionMode="Single"
+                          ItemInvoked="BookmarksTreeView_ItemInvoked">
+                    <TreeView.Resources>
+                        <DataTemplate x:Key="BookmarkItemTemplate" x:DataType="models:Bookmark">
+                            <StackPanel Margin="28,4,8,4">
+                                <TextBlock Text="{Binding Title}" FontSize="12"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="220" />
+                                <TextBlock Text="{Binding Url}" FontSize="10"
+                                           Opacity="0.6"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="220" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </TreeView.Resources>
+                </TreeView>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

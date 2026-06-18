@@ -41,13 +41,15 @@ public sealed partial class SubtitleOverlay : Window
         Win32Helper.SetLayeredWindowAttributes(_hwnd, 0, 220, Win32Helper.LWA_ALPHA);
         Win32Helper.SetAlwaysOnTop(_hwnd, true);
 
-        // Position at bottom-center of screen
-        var screenWidth = Windows.Graphics.Display.DisplayInformation.GetForCurrentView().ScreenWidthInRawPixels;
+        // Position at bottom-center of screen (below center, per requirement)
+        var displayArea = Microsoft.UI.Windowing.DisplayArea.Primary;
+        var screenWidth = displayArea.WorkArea.Width;
+        var screenHeight = displayArea.WorkArea.Height;
 
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32
         {
             X = (int)(screenWidth / 2 - 400),
-            Y = 100,
+            Y = (int)(screenHeight * 0.65),
             Width = 800,
             Height = 100
         });

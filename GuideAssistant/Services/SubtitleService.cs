@@ -11,6 +11,7 @@ public class SubtitleService
     private string? _currentUrl;
     private Timer? _syncTimer;
     private double _currentTime;
+    private string? _lastSubtitleContent;
 
     public event Action<string>? SubtitleChanged;
     public event Action<string>? DirectionWordDetected;
@@ -68,8 +69,16 @@ public class SubtitleService
         var item = _currentSubtitles.FirstOrDefault(s => _currentTime >= s.From && _currentTime <= s.To);
         if (item != null)
         {
-            SubtitleChanged?.Invoke(item.Content);
-            CheckDirectionWords(item.Content);
+            if (item.Content != _lastSubtitleContent)
+            {
+                _lastSubtitleContent = item.Content;
+                SubtitleChanged?.Invoke(item.Content);
+                CheckDirectionWords(item.Content);
+            }
+        }
+        else
+        {
+            _lastSubtitleContent = null;
         }
     }
 

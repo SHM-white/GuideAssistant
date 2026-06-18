@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 
 namespace GuideAssistant.Controls;
 
@@ -13,6 +14,17 @@ public sealed partial class TitleBar : UserControl
     public TitleBar()
     {
         InitializeComponent();
+        ApplyHoverTransparency(MinimizeBtn);
+        ApplyHoverTransparency(MaximizeBtn);
+        ApplyHoverTransparency(CloseBtn);
+        ApplyHoverTransparency(OpacityBtn);
+    }
+
+    private static void ApplyHoverTransparency(Button btn)
+    {
+        btn.Opacity = 0.5;
+        btn.PointerEntered += (s, e) => btn.Opacity = 1.0;
+        btn.PointerExited += (s, e) => btn.Opacity = 0.5;
     }
 
     private void MinimizeBtn_Click(object sender, RoutedEventArgs e)

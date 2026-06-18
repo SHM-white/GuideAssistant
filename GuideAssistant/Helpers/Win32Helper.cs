@@ -19,6 +19,11 @@ public static class Win32Helper
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_EX_NOACTIVATE = 0x08000000;
     public const int GWL_EXSTYLE = -20;
+    public const int GWL_STYLE = -16;
+
+    public const int WS_SYSMENU = 0x00080000;
+    public const int WS_MINIMIZEBOX = 0x00020000;
+    public const int WS_MAXIMIZEBOX = 0x00010000;
 
     public const int LWA_ALPHA = 0x00000002;
 
@@ -46,6 +51,12 @@ public static class Win32Helper
     [DllImport("user32.dll")]
     public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
     [DllImport("user32.dll")]
     public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
@@ -59,7 +70,9 @@ public static class Win32Helper
     public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
     public const uint SWP_NOMOVE = 0x0002;
     public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOZORDER = 0x0004;
     public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_FRAMECHANGED = 0x0020;
 
     public const int SW_HIDE = 0;
     public const int SW_SHOW = 5;
@@ -84,5 +97,19 @@ public static class Win32Helper
             SetWindowLong(hWnd, GWL_EXSTYLE, exStyle | WS_EX_TRANSPARENT | WS_EX_LAYERED);
         else
             SetWindowLong(hWnd, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
+    }
+
+    /// <summary>
+    /// Removes system caption buttons (minimize/maximize/close) from the title bar.
+    /// </summary>
+    public static void HideSystemCaptionButtons(IntPtr hWnd)
+    {
+        var style = GetWindowLongPtr64(hWnd, GWL_STYLE).ToInt32();
+        style &= ~WS_SYSMENU;
+        SetWindowLongPtr64(hWnd, GWL_STYLE, (IntPtr)style);
+
+        // Force the window frame to redraw
+        SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 }

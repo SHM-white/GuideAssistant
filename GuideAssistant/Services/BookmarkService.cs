@@ -9,6 +9,8 @@ public class BookmarkService
     private readonly BookmarkRepository _repo;
     private readonly GameRepository _gameRepo;
 
+    public event Action? BookmarksChanged;
+
     public BookmarkService(BookmarkRepository repo, GameRepository gameRepo)
     {
         _repo = repo;
@@ -18,9 +20,18 @@ public class BookmarkService
     public List<Bookmark> GetAll() => _repo.GetAll();
     public List<Bookmark> Search(string keyword) => _repo.Search(keyword);
     public List<Bookmark> GetByGame(int gameId) => _repo.GetByGame(gameId);
-    public int Add(Bookmark b) => _repo.Add(b);
+    public int Add(Bookmark b)
+    {
+        var id = _repo.Add(b);
+        BookmarksChanged?.Invoke();
+        return id;
+    }
     public void Update(Bookmark b) => _repo.Update(b);
-    public void Delete(int id) => _repo.Delete(id);
+    public void Delete(int id)
+    {
+        _repo.Delete(id);
+        BookmarksChanged?.Invoke();
+    }
 
     public List<GameConfig> GetAllGames() => _gameRepo.GetAll();
 
@@ -42,6 +53,7 @@ public class BookmarkService
         };
         var id = _repo.Add(b);
         Log.Information("Bookmark added: {Title}", title);
+        BookmarksChanged?.Invoke();
         return id;
     }
 }

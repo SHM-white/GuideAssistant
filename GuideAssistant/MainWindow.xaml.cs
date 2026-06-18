@@ -1,5 +1,6 @@
 using GuideAssistant.Controls;
 using GuideAssistant.Data;
+using GuideAssistant.Helpers;
 using GuideAssistant.Models;
 using GuideAssistant.Services;
 using GuideAssistant.Views;
@@ -29,6 +30,7 @@ public sealed partial class MainWindow : Window
     private SubtitleOverlay? _subtitleOverlay;
     private MiniMapOverlay? _miniMapOverlay;
     private IntPtr _hwnd;
+    private System.Timers.Timer? _subtitleTimeSyncTimer;
 
     private bool _isVisible = true;
     private bool _isSubtitleEnabled;
@@ -64,6 +66,17 @@ public sealed partial class MainWindow : Window
         _hotkeyRepository = hotkeyRepository;
         _windowStateRepo = windowStateRepo;
 
+        // Refresh bookmarks panel when bookmarks change
+        _bookmarkService.BookmarksChanged += () =>
+        {
+            if (BookmarksPanel.Visibility == Visibility.Visible)
+                DispatcherQueue.TryEnqueue(RefreshBookmarksPanel);
+        };
+
+        // Show bookmarks panel by default
+        RefreshBookmarksPanel();
+        BookmarksPanel.Visibility = Visibility.Visible;
+
         _hwnd = WindowNative.GetWindowHandle(this);
         _windowManager.MainWindowHandle = _hwnd;
 
@@ -74,6 +87,9 @@ public sealed partial class MainWindow : Window
         InitializeHotkeys();
         InitializeSubtitle();
         RestoreWindowState();
+
+        // Start game detection for auto-launching helpers
+        _gameDetector.Start();
 
         // Create and show the ToolbarWindow
         try
@@ -92,34 +108,52 @@ public sealed partial class MainWindow : Window
     {
         var titleBar = AppWindow.TitleBar;
         titleBar.ExtendsContentIntoTitleBar = true;
-        titleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
+        titleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
 
         // Make system title bar elements fully transparent
-        var transparent = Windows.UI.Color.FromArgb(0, 0, 0, 0);
-        titleBar.ButtonBackgroundColor = transparent;
-        titleBar.ButtonForegroundColor = transparent;
-        titleBar.ButtonInactiveBackgroundColor = transparent;
-        titleBar.ButtonInactiveForegroundColor = transparent;
-        titleBar.ButtonHoverBackgroundColor = Windows.UI.Color.FromArgb(40, 255, 255, 255);
-        titleBar.ButtonHoverForegroundColor = Colors.White;
-        titleBar.ButtonPressedBackgroundColor = Windows.UI.Color.FromArgb(60, 255, 255, 255);
-        titleBar.ButtonPressedForegroundColor = Colors.White;
+        titleBar.ButtonBackgroundColor = Colors.Transparent;
+        titleBar.ButtonForegroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveForegroundColor = Colors.Transparent;
+        titleBar.ButtonHoverBackgroundColor = Colors.Transparent;
+        titleBar.ButtonHoverForegroundColor = Colors.Transparent;
+        titleBar.ButtonPressedBackgroundColor = Colors.Transparent;
+        titleBar.ButtonPressedForegroundColor = Colors.Transparent;
 
         // Remove system title text and icon
         AppWindow.Title = "";
 
+        // Set drag region: top 48px area is draggable (extends above the 6px visual bar)
+        titleBar.SetDragRectangles(new Windows.Graphics.RectInt32[]
+        {
+            new Windows.Graphics.RectInt32 { X = 0, Y = 0, Width = 100000, Height = 48 }
+        });
+
         var presenter = AppWindow.Presenter as OverlappedPresenter;
         if (presenter != null)
             presenter.IsAlwaysOnTop = true;
+
         AppWindow.Show();
+
+        // Hide system caption buttons — call immediately + after activation + delayed retry
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            Helpers.Win32Helper.HideSystemCaptionButtons(_hwnd);
+        });
+        Activated += (s, e) =>
+        {
+            Helpers.Win32Helper.HideSystemCaptionButtons(_hwnd);
+        };
+
         Log.Information("MainWindow initialized");
     }
 
     private void InitializeControls()
     {
-        TitleBarControl.MinimizeClicked += () =>
+        // Wire floating window buttons
+        MinimizeBtn.Click += (s, e) =>
             (AppWindow.Presenter as OverlappedPresenter)?.Minimize();
-        TitleBarControl.MaximizeClicked += () =>
+        MaximizeBtn.Click += (s, e) =>
         {
             var p = AppWindow.Presenter as OverlappedPresenter;
             if (p != null)
@@ -128,9 +162,21 @@ public sealed partial class MainWindow : Window
                 else p.Maximize();
             }
         };
-        TitleBarControl.CloseClicked += () => Close();
-        TitleBarControl.OpacitySliderControl.ValueChanged += (s, e) =>
+        CloseBtn.Click += (s, e) => Close();
+        OpacityBtn.Click += (s, e) =>
+        {
+            OpacitySlider.Visibility = OpacitySlider.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        };
+        OpacitySlider.ValueChanged += (s, e) =>
             _windowManager.SetOpacity(_hwnd, e.NewValue);
+
+        // Hover transparency for window buttons
+        ApplyHoverTransparency(OpacityBtn);
+        ApplyHoverTransparency(MinimizeBtn);
+        ApplyHoverTransparency(MaximizeBtn);
+        ApplyHoverTransparency(CloseBtn);
 
         WebViewControl.Initialize(_tabManager);
         WebViewControl.TitleChanged += (title) => TitleChanged?.Invoke(title);
@@ -146,10 +192,32 @@ public sealed partial class MainWindow : Window
             SwitchToTab(_tabManager.ActiveTab);
     }
 
+    private static void ApplyHoverTransparency(Button btn)
+    {
+        btn.Opacity = 0.5;
+        btn.PointerEntered += (s, e) => btn.Opacity = 1.0;
+        btn.PointerExited += (s, e) => btn.Opacity = 0.5;
+    }
+
     private void SwitchToTab(TabItem tab)
     {
         WebViewControl.LoadUrl(tab, tab.Url);
         UrlChanged?.Invoke(tab.Url);
+    }
+
+    public void SwitchToTabById(string tabId)
+    {
+        var tab = _tabManager.Tabs.FirstOrDefault(t => t.Id == tabId);
+        if (tab != null)
+        {
+            _tabManager.ActiveTab = tab;
+            SwitchToTab(tab);
+        }
+    }
+
+    public void RemoveWebViewForTab(string tabId)
+    {
+        WebViewControl.RemoveWebView(tabId);
     }
 
     // --- Public API for ToolbarWindow ---
@@ -157,6 +225,8 @@ public sealed partial class MainWindow : Window
     public void NavigateToUrl(string url)
     {
         if (_tabManager.ActiveTab == null) return;
+        // Ensure the active tab's WebView is displayed before navigating
+        SwitchToTab(_tabManager.ActiveTab);
         _tabManager.Navigate(_tabManager.ActiveTab, url);
         WebViewControl.Navigate(url);
     }
@@ -177,6 +247,72 @@ public sealed partial class MainWindow : Window
         return url != null && _bookmarkService.IsUrlBookmarked(url);
     }
 
+    public void ToggleBookmarksPanel()
+    {
+        if (BookmarksPanel.Visibility == Visibility.Visible)
+            BookmarksPanel.Visibility = Visibility.Collapsed;
+        else
+        {
+            RefreshBookmarksPanel();
+            BookmarksPanel.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void RefreshBookmarksPanel()
+    {
+        BookmarksTreeView.RootNodes.Clear();
+
+        var allBookmarks = _bookmarkService.GetAll();
+        var allGames = _bookmarkService.GetAllGames();
+        var gameLookup = allGames.ToDictionary(g => g.Id, g => g.GameName);
+
+        // Group bookmarks by game, ungrouped go to "未分类"
+        var grouped = allBookmarks
+            .GroupBy(b => b.GameId.HasValue && gameLookup.ContainsKey(b.GameId.Value)
+                ? gameLookup[b.GameId.Value]
+                : "未分类")
+            .OrderBy(g => g.Key == "未分类" ? 1 : 0)
+            .ThenBy(g => g.Key);
+
+        foreach (var group in grouped)
+        {
+            var folderNode = new TreeViewNode
+            {
+                Content = $"📁 {group.Key}  ({group.Count()})",
+                IsExpanded = true
+            };
+
+            foreach (var bm in group)
+            {
+                var itemNode = new TreeViewNode
+                {
+                    Content = bm
+                };
+                folderNode.Children.Add(itemNode);
+            }
+
+            BookmarksTreeView.RootNodes.Add(folderNode);
+        }
+    }
+
+    private void BookmarksTreeView_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItem is Bookmark bookmark)
+        {
+            NavigateToUrl(bookmark.Url);
+        }
+    }
+
+    private void BookmarksPanelClose_Click(object sender, RoutedEventArgs e)
+    {
+        BookmarksPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private void BookmarksToggleBtn_Click(object sender, RoutedEventArgs e)
+    {
+        ToggleBookmarksPanel();
+    }
+
     public async Task<string> ExecuteWebScript(string script)
         => await WebViewControl.ExecuteScript(script);
 
@@ -185,7 +321,19 @@ public sealed partial class MainWindow : Window
         var url = _tabManager.GetBookmarkUrl();
         var title = _tabManager.GetBookmarkTitle();
         if (!string.IsNullOrEmpty(url) && !string.IsNullOrEmpty(title))
-            _bookmarkService.QuickAdd(title, url);
+        {
+            int? gameId = ResolveForegroundGameId();
+            _bookmarkService.QuickAdd(title, url, gameId: gameId);
+        }
+    }
+
+    private int? ResolveForegroundGameId()
+    {
+        var gameName = _gameDetector.CurrentForegroundGameName;
+        if (string.IsNullOrEmpty(gameName)) return null;
+        var games = _bookmarkService.GetAllGames();
+        return games.FirstOrDefault(g =>
+            string.Equals(g.GameName, gameName, StringComparison.OrdinalIgnoreCase))?.Id;
     }
 
     public void ShowBookmarkSearch(string keyword)
@@ -196,26 +344,66 @@ public sealed partial class MainWindow : Window
             _tabManager.Navigate(_tabManager.ActiveTab, results[0].Url);
             WebViewControl.Navigate(results[0].Url);
         }
+        else if (results.Count == 0)
+        {
+            Log.Information("Bookmark search returned no results for: {Keyword}", keyword);
+        }
     }
 
     public void ShowSettingsPage()
     {
-        var stack = new StackPanel { Spacing = 12, Padding = new Thickness(20) };
-        stack.Children.Add(new TextBlock { Text = "快捷键", FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        stack.Children.Add(new TextBlock { Text = "` - 播放/暂停 | 5 - 快退 | 6 - 快进 | 8 - 音量- | 9 - 音量+" });
-        stack.Children.Add(new TextBlock { Text = "S - 字幕切换 | M - 小地图切换" });
-        stack.Children.Add(new Rectangle { Height = 1, Fill = new SolidColorBrush(Colors.Gray), Margin = new Thickness(0, 4, 0, 4) });
-        stack.Children.Add(new TextBlock { Text = "窗口控制", FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        stack.Children.Add(new CheckBox { Content = "启用字幕覆盖", IsChecked = _isSubtitleEnabled });
-        stack.Children.Add(new CheckBox { Content = "启用小地图覆盖", IsChecked = _isMiniMapEnabled });
+        var settingsWindow = new SettingsWindow(
+            _hotkeyRepository,
+            _hotkeyService,
+            _isSubtitleEnabled,
+            _isMiniMapEnabled,
+            onHotkeysChanged: ReloadHotkeys,
+            onSubtitleToggled: (enabled) =>
+            {
+                if (enabled != _isSubtitleEnabled)
+                    HandleHotkeyAction("toggle_subtitle");
+            },
+            onMinimapToggled: (enabled) =>
+            {
+                if (enabled != _isMiniMapEnabled)
+                    HandleHotkeyAction("toggle_minimap");
+            },
+            getOpacity: () => OpacitySlider.Value,
+            setOpacity: (val) =>
+            {
+                OpacitySlider.Value = val;
+                _windowManager.SetOpacity(_hwnd, val);
+            });
+        settingsWindow.Activate();
+    }
 
-        _ = new ContentDialog
+    private void ReloadHotkeys()
+    {
+        // Unregister all current hotkeys
+        foreach (var id in _hotkeyService.GetRegisteredIds())
+            _hotkeyService.UnregisterHotkey(id);
+
+        // Re-register from saved profile
+        var profile = _hotkeyRepository.GetDefaultProfile();
+        if (profile?.Bindings.Count > 0)
         {
-            Title = "设置",
-            CloseButtonText = "关闭",
-            XamlRoot = Content.XamlRoot,
-            Content = stack
-        }.ShowAsync();
+            foreach (var b in profile.Bindings)
+            {
+                if (b.VirtualKey != 0)
+                    _hotkeyService.RegisterHotkey(b.ActionName, b.Modifiers, b.VirtualKey, () => HandleHotkeyAction(b.ActionName));
+            }
+        }
+
+        // Update the low-level hook mapping dynamically — force a restart
+        _hotkeyService.StopLowLevelHook();
+        _hotkeyService.StartLowLevelHook((vkCode) =>
+        {
+            var binding = profile?.Bindings.FirstOrDefault(b => b.VirtualKey == (uint)vkCode);
+            if (binding != null)
+                HandleHotkeyAction(binding.ActionName);
+        });
+
+        Log.Information("Hotkeys reloaded from profile");
     }
 
     private void InitializeHotkeys()
@@ -226,16 +414,18 @@ public sealed partial class MainWindow : Window
         if (profile?.Bindings.Count > 0)
         {
             foreach (var b in profile.Bindings)
-                _hotkeyService.RegisterHotkey(b.ActionName, b.Modifiers, b.VirtualKey, () => HandleHotkeyAction(b.ActionName));
+            {
+                if (b.VirtualKey != 0)
+                    _hotkeyService.RegisterHotkey(b.ActionName, b.Modifiers, b.VirtualKey, () => HandleHotkeyAction(b.ActionName));
+            }
         }
 
         _hotkeyService.StartLowLevelHook((vkCode) =>
         {
-            if (vkCode == 0xC0) HandleHotkeyAction("play_pause");
-            else if (vkCode == 0x35) HandleHotkeyAction("fast_backward");
-            else if (vkCode == 0x36) HandleHotkeyAction("fast_forward");
-            else if (vkCode == 0x38) HandleHotkeyAction("volume_down");
-            else if (vkCode == 0x39) HandleHotkeyAction("volume_up");
+            var profile = _hotkeyRepository.GetDefaultProfile();
+            var binding = profile?.Bindings.FirstOrDefault(b => b.VirtualKey == (uint)vkCode);
+            if (binding != null)
+                HandleHotkeyAction(binding.ActionName);
         });
     }
 
@@ -266,7 +456,10 @@ public sealed partial class MainWindow : Window
                 var url = _tabManager.GetBookmarkUrl();
                 var title = _tabManager.GetBookmarkTitle();
                 if (!string.IsNullOrEmpty(url) && !string.IsNullOrEmpty(title))
-                    _bookmarkService.QuickAdd(title, url);
+                {
+                    int? gameId = ResolveForegroundGameId();
+                    _bookmarkService.QuickAdd(title, url, gameId: gameId);
+                }
                 break;
             case "toggle_subtitle":
                 _isSubtitleEnabled = !_isSubtitleEnabled;
@@ -292,13 +485,46 @@ public sealed partial class MainWindow : Window
             _subtitleOverlay = new SubtitleOverlay(_subtitleService);
             _subtitleOverlay.AppWindow.Show();
             _subtitleService.StartSync();
+            StartSubtitleTimeSync();
         }
         else
         {
+            StopSubtitleTimeSync();
             _subtitleService.StopSync();
             _subtitleOverlay?.Close();
             _subtitleOverlay = null;
         }
+    }
+
+    private void StartSubtitleTimeSync()
+    {
+        _subtitleTimeSyncTimer?.Dispose();
+        _subtitleTimeSyncTimer = new System.Timers.Timer(500) { AutoReset = true };
+        _subtitleTimeSyncTimer.Elapsed += (s, e) =>
+        {
+            _ = DispatcherQueue.TryEnqueue(async () =>
+            {
+                try
+                {
+                    var json = await WebViewControl.ExecuteScript("window.__gv_player.getTime()");
+                    if (!string.IsNullOrEmpty(json))
+                    {
+                        var doc = System.Text.Json.JsonDocument.Parse(json);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("current", out var current))
+                            _subtitleService.UpdateTime(current.GetDouble());
+                    }
+                }
+                catch { }
+            });
+        };
+        _subtitleTimeSyncTimer.Start();
+    }
+
+    private void StopSubtitleTimeSync()
+    {
+        _subtitleTimeSyncTimer?.Dispose();
+        _subtitleTimeSyncTimer = null;
     }
 
     private void ToggleMiniMapOverlay()
@@ -329,7 +555,7 @@ public sealed partial class MainWindow : Window
                 Width = (int)state.Width, Height = (int)state.Height
             });
             _windowManager.SetOpacity(_hwnd, state.Opacity);
-            TitleBarControl.OpacitySliderControl.Value = state.Opacity;
+            OpacitySlider.Value = state.Opacity;
         }
         catch (Exception ex) { Log.Warning(ex, "Restore window state failed"); }
     }
@@ -343,7 +569,7 @@ public sealed partial class MainWindow : Window
             WindowName = "MainWindow",
             X = pos.X, Y = pos.Y,
             Width = size.Width, Height = size.Height,
-            Opacity = TitleBarControl.OpacitySliderControl.Value,
+            Opacity = OpacitySlider.Value,
             IsAlwaysOnTop = true
         });
     }
@@ -351,6 +577,10 @@ public sealed partial class MainWindow : Window
     private void MainWindow_Closed(object sender, WindowEventArgs args)
     {
         SaveWindowState();
+        StopSubtitleTimeSync();
+        _subtitleOverlay?.Close();
+        _miniMapOverlay?.Close();
+        _toolbarWindow?.Close();
         _hotkeyService.Dispose();
         _gameDetector.Dispose();
         _subtitleService.Dispose();

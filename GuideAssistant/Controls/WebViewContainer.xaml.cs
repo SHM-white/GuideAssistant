@@ -37,29 +37,43 @@ public sealed partial class WebViewContainer : UserControl
 
         try
         {
+            var isNew = !_tabManager.HasWebView(tab.Id);
             var wv = _tabManager.GetOrCreateWebView(tab, t =>
             {
                 var webView2 = new Microsoft.UI.Xaml.Controls.WebView2();
-                WebViewHost.Children.Clear();
+                webView2.Visibility = Visibility.Collapsed;
                 WebViewHost.Children.Add(webView2);
 
                 webView2.EnsureCoreWebView2Async().Completed += (s, e) =>
                 {
                     if (webView2.CoreWebView2 != null)
+                    {
                         SetupWebView(webView2, t);
+                        if (!string.IsNullOrEmpty(t.Url))
+                            webView2.CoreWebView2.Navigate(t.Url);
+                    }
                 };
-                webView2.Source = new Uri(url);
                 return webView2;
             });
 
+            // Hide all WebViews, then show only the active one
+            foreach (var child in WebViewHost.Children)
+            {
+                if (child is Microsoft.UI.Xaml.Controls.WebView2 childWv)
+                    childWv.Visibility = Visibility.Collapsed;
+            }
+            wv.Visibility = Visibility.Visible;
             _webView = wv;
 
-            // Ensure the current active WebView is displayed
-            if (!WebViewHost.Children.Contains(wv))
+            // Navigate if CoreWebView2 is already ready and we're loading a different URL
+            if (wv.CoreWebView2 != null && isNew)
             {
-                WebViewHost.Children.Clear();
-                WebViewHost.Children.Add(wv);
-                wv.Visibility = Visibility.Visible;
+                wv.CoreWebView2.Navigate(url);
+            }
+            else if (wv.CoreWebView2 == null)
+            {
+                // CoreWebView2 not ready yet; update tab URL so completion handler uses it
+                tab.Url = url;
             }
         }
         catch (COMException ex) when (ex.HResult == unchecked((int)0x800F1000))
@@ -68,7 +82,18 @@ public sealed partial class WebViewContainer : UserControl
             {
                 _webViewMissingShown = true;
                 Log.Error(ex, "WebView2 runtime not installed");
-                Application.Current.Exit();
+                _ = DispatcherQueue.TryEnqueue(async () =>
+                {
+                    var dialog = new ContentDialog
+                    {
+                        Title = "缺少 WebView2 运行时",
+                        Content = "请安装 Microsoft Edge WebView2 运行时后重新启动应用。\n下载地址: https://go.microsoft.com/fwlink/p/?LinkId=2124703",
+                        CloseButtonText = "退出",
+                        XamlRoot = this.XamlRoot
+                    };
+                    await dialog.ShowAsync();
+                    Application.Current.Exit();
+                });
             }
         }
         catch (Exception ex)
@@ -136,28 +161,36 @@ window.__gv_player = {
         {
             var title = wv.CoreWebView2.DocumentTitle;
             tab.Title = string.IsNullOrEmpty(title) ? "新标签页" : title;
-            TitleChanged?.Invoke(tab.Title);
+            if (wv == _webView)
+                TitleChanged?.Invoke(tab.Title);
         };
 
         wv.CoreWebView2.SourceChanged += (s, e) =>
         {
-            var url = wv.Source?.ToString() ?? "";
-            tab.Url = url;
-            UrlChanged?.Invoke(url);
+            var sourceUrl = wv.Source?.ToString() ?? "";
+            tab.Url = sourceUrl;
+            if (wv == _webView)
+                UrlChanged?.Invoke(sourceUrl);
         };
 
         wv.CoreWebView2.NavigationStarting += (s, e) =>
         {
             tab.IsLoading = true;
-            LoadingBar.Visibility = Visibility.Visible;
-            LoadingBar.IsIndeterminate = true;
+            if (wv == _webView)
+            {
+                LoadingBar.Visibility = Visibility.Visible;
+                LoadingBar.IsIndeterminate = true;
+            }
             LoadingStateChanged?.Invoke(true);
         };
 
         wv.CoreWebView2.NavigationCompleted += (s, e) =>
         {
             tab.IsLoading = false;
-            LoadingBar.Visibility = Visibility.Collapsed;
+            if (wv == _webView)
+            {
+                LoadingBar.Visibility = Visibility.Collapsed;
+            }
             LoadingStateChanged?.Invoke(false);
 
             tab.CanGoBack = wv.CoreWebView2.CanGoBack;
@@ -183,9 +216,29 @@ window.__gv_player = {
 
     public void Navigate(string url)
     {
-        if (_webView?.CoreWebView2 != null && Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        if (_webView == null || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return;
+
+        if (_webView.CoreWebView2 != null)
         {
             _webView.CoreWebView2.Navigate(url);
+        }
+        else
+        {
+            // CoreWebView2 not ready yet — set Source directly; it queues the navigation
+            try
+            {
+                _webView.Source = uri;
+            }
+            catch (ObjectDisposedException)
+            {
+                // WebView2 was closed (e.g., tab closed); recreate for current active tab
+                if (_tabManager?.ActiveTab != null)
+                {
+                    _tabManager.InvalidateWebViewCache(_tabManager.ActiveTab.Id);
+                    LoadUrl(_tabManager.ActiveTab, url);
+                }
+            }
         }
     }
 
@@ -202,5 +255,16 @@ window.__gv_player = {
     public void Refresh()
     {
         _webView?.CoreWebView2?.Reload();
+    }
+
+    public void RemoveWebView(string tabId)
+    {
+        var wv = _tabManager?.GetWebView(tabId);
+        if (wv != null && WebViewHost.Children.Contains(wv))
+        {
+            WebViewHost.Children.Remove(wv);
+        }
+        if (_webView == wv)
+            _webView = null;
     }
 }

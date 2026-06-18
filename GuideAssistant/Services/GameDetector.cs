@@ -16,6 +16,11 @@ public class GameDetector : IDisposable
     private List<GameConfig> _configs = new();
     private bool _isRunning;
 
+    /// <summary>
+    /// Gets the game name currently in the foreground, or null if no tracked game is active.
+    /// </summary>
+    public string? CurrentForegroundGameName { get; private set; }
+
     // Callback when game state changes
     public event Action<GameConfig, bool>? GameStateChanged;
 
@@ -62,11 +67,12 @@ public class GameDetector : IDisposable
             {
                 if (!config.AutoDetect) continue;
                 var gameExe = System.IO.Path.GetFileNameWithoutExtension(config.GamePath);
-                var isRunning = processName.Contains(gameExe, StringComparison.OrdinalIgnoreCase);
+                var isRunning = string.Equals(processName, gameExe, StringComparison.OrdinalIgnoreCase);
 
                 if (isRunning && !_activeGames.Contains(config.GameName))
                 {
                     _activeGames.Add(config.GameName);
+                    CurrentForegroundGameName = config.GameName;
                     _launcher.LaunchHelper(config);
                     GameStateChanged?.Invoke(config, true);
                     Log.Information("Game detected: {Game}", config.GameName);
@@ -74,9 +80,15 @@ public class GameDetector : IDisposable
                 else if (!isRunning && _activeGames.Contains(config.GameName))
                 {
                     _activeGames.Remove(config.GameName);
+                    if (CurrentForegroundGameName == config.GameName)
+                        CurrentForegroundGameName = null;
                     _launcher.StopHelper(config);
                     GameStateChanged?.Invoke(config, false);
                     Log.Information("Game stopped: {Game}", config.GameName);
+                }
+                else if (isRunning)
+                {
+                    CurrentForegroundGameName = config.GameName;
                 }
             }
         }

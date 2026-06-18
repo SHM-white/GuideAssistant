@@ -48,7 +48,7 @@ public sealed partial class NavigationBar : UserControl
         input = input.Trim();
 
         // If not a URL, search via Bing
-        if (!input.Contains(".") || input.Contains(" "))
+        if (!IsLikelyUrl(input))
         {
             input = $"https://www.bing.com/search?q={Uri.EscapeDataString(input)}";
         }
@@ -58,6 +58,41 @@ public sealed partial class NavigationBar : UserControl
         }
 
         NavigateRequested?.Invoke(input);
+    }
+
+    private static bool IsLikelyUrl(string input)
+    {
+        // Already has a scheme
+        if (input.StartsWith("http://") || input.StartsWith("https://"))
+            return true;
+
+        // Contains spaces — definitely a search
+        if (input.Contains(' '))
+            return false;
+
+        // Contains common CJK characters — likely a search term
+        if (input.Any(c => c >= 0x4E00 && c <= 0x9FFF))
+            return false;
+
+        // Has a dot and no spaces — likely a domain name
+        if (input.Contains('.'))
+            return true;
+
+        // localhost or hostname with port
+        if (input.StartsWith("localhost", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Try parse as URI to let the system decide
+        if (Uri.TryCreate($"https://{input}", UriKind.Absolute, out var uri))
+        {
+            // Reject if the host portion is non-ASCII (IDN that might be a false positive)
+            if (uri.Host.Contains('.'))
+                return true;
+            // Single-label host: only accept localhost-like
+            return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 
     private void BackBtn_Click(object sender, RoutedEventArgs e)

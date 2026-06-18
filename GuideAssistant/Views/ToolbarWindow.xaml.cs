@@ -12,12 +12,15 @@ public sealed partial class ToolbarWindow : Window
     private MainWindow _mainWindow = default!;
     private readonly TabManager _tabManager;
     private readonly BookmarkService _bookmarkService;
+    private readonly GameDetector _gameDetector;
+    private bool _suppressSelectionChanged;
 
-    public ToolbarWindow(TabManager tabManager, BookmarkService bookmarkService)
+    public ToolbarWindow(TabManager tabManager, BookmarkService bookmarkService, GameDetector gameDetector)
     {
         InitializeComponent();
         _tabManager = tabManager;
         _bookmarkService = bookmarkService;
+        _gameDetector = gameDetector;
 
         InitializeWindow();
     }
@@ -70,15 +73,20 @@ public sealed partial class ToolbarWindow : Window
     private void SelectActiveTab()
     {
         if (_tabManager.ActiveTab != null)
+        {
+            _suppressSelectionChanged = true;
             TabListView.SelectedItem = _tabManager.ActiveTab;
+            _suppressSelectionChanged = false;
+        }
     }
 
     private void TabListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressSelectionChanged) return;
+
         if (TabListView.SelectedItem is TabItem tab)
         {
-            _tabManager.ActiveTab = tab;
-            _mainWindow.NavigateToUrl(tab.Url);
+            _mainWindow.SwitchToTabById(tab.Id);
             NavBarControl.SetUrl(tab.Url);
         }
     }
@@ -93,7 +101,8 @@ public sealed partial class ToolbarWindow : Window
             }
             else
             {
-                _bookmarkService.QuickAdd(tab.Title, tab.Url);
+                int? gameId = ResolveForegroundGameId();
+                _bookmarkService.QuickAdd(tab.Title, tab.Url, gameId: gameId);
                 ShowDialog("收藏", "已添加到收藏夹 ✓");
             }
             RefreshTabList();
@@ -101,17 +110,27 @@ public sealed partial class ToolbarWindow : Window
         }
     }
 
+    private int? ResolveForegroundGameId()
+    {
+        var gameName = _gameDetector.CurrentForegroundGameName;
+        if (string.IsNullOrEmpty(gameName)) return null;
+        var games = _bookmarkService.GetAllGames();
+        return games.FirstOrDefault(g =>
+            string.Equals(g.GameName, gameName, StringComparison.OrdinalIgnoreCase))?.Id;
+    }
+
     private void TabCloseBtn_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.DataContext is TabItem tab)
         {
             _tabManager.CloseTab(tab.Id);
+            _mainWindow.RemoveWebViewForTab(tab.Id);
             RefreshTabList();
             SelectActiveTab();
 
             if (_tabManager.ActiveTab != null)
             {
-                _mainWindow.NavigateToUrl(_tabManager.ActiveTab.Url);
+                _mainWindow.SwitchToTabById(_tabManager.ActiveTab.Id);
                 NavBarControl.SetUrl(_tabManager.ActiveTab.Url);
             }
         }
@@ -122,7 +141,8 @@ public sealed partial class ToolbarWindow : Window
         var tab = _tabManager.AddTab();
         RefreshTabList();
         SelectActiveTab();
-        _mainWindow.NavigateToUrl(tab.Url);
+        // Switch to the new tab (creates its WebView) without touching other tabs
+        _mainWindow.SwitchToTabById(tab.Id);
         NavBarControl.SetUrl(tab.Url);
     }
 

@@ -29,7 +29,8 @@ public sealed partial class MiniMapOverlay : Window
         Win32Helper.SetWindowOpacity(_hwnd, 0.7);
         Win32Helper.SetAlwaysOnTop(_hwnd, true);
 
-        var screenWidth = Windows.Graphics.Display.DisplayInformation.GetForCurrentView().ScreenWidthInRawPixels;
+        var displayArea = Microsoft.UI.Windowing.DisplayArea.Primary;
+        var screenWidth = displayArea.WorkArea.Width;
 
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32
         {
@@ -67,7 +68,10 @@ public sealed partial class MiniMapOverlay : Window
         {
             oldTimer.Stop();
             oldTimer.Dispose();
-            _arrowTimers.Remove(label);
+            lock (_arrowTimers)
+            {
+                _arrowTimers.Remove(label);
+            }
         }
 
         // Create arrow
@@ -87,7 +91,8 @@ public sealed partial class MiniMapOverlay : Window
             Opacity = 0.9
         };
 
-        // Rotate arrow
+        // Rotate arrow around its own center
+        arrow.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
         var transform = new RotateTransform { Angle = angle };
         arrow.RenderTransform = transform;
 
@@ -100,17 +105,27 @@ public sealed partial class MiniMapOverlay : Window
 
         // Auto remove after 4 seconds
         var timer = new System.Timers.Timer(4000) { AutoReset = false };
+        var capturedLabel = label;
         timer.Elapsed += (s, e) =>
         {
             _ = DispatcherQueue.TryEnqueue(() =>
             {
-                ArrowCanvas.Children.Remove(arrow);
-                _activeArrows.Remove(label);
+                if (_activeArrows.TryGetValue(capturedLabel, out var capturedArrow))
+                {
+                    ArrowCanvas.Children.Remove(capturedArrow);
+                    _activeArrows.Remove(capturedLabel);
+                }
             });
             timer.Dispose();
-            _arrowTimers.Remove(label);
+            lock (_arrowTimers)
+            {
+                _arrowTimers.Remove(capturedLabel);
+            }
         };
         timer.Start();
-        _arrowTimers[label] = timer;
+        lock (_arrowTimers)
+        {
+            _arrowTimers[label] = timer;
+        }
     }
 }

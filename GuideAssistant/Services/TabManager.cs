@@ -66,11 +66,29 @@ public partial class TabManager : ObservableObject
         return _webViewCache[tab.Id];
     }
 
+    public bool HasWebView(string tabId) => _webViewCache.ContainsKey(tabId);
+
+    public Microsoft.UI.Xaml.Controls.WebView2? GetWebView(string tabId)
+    {
+        _webViewCache.TryGetValue(tabId, out var wv);
+        return wv;
+    }
+
+    public void InvalidateWebViewCache(string tabId)
+    {
+        if (_webViewCache.TryGetValue(tabId, out var wv))
+        {
+            try { wv.Close(); } catch { }
+            _webViewCache.Remove(tabId);
+        }
+    }
+
     public void NavigateCurrentTab(string url)
     {
         if (ActiveTab == null) return;
         ActiveTab.Url = url;
         ActiveTab.BackHistory.Push(url);
+        ActiveTab.ForwardHistory.Clear();
     }
 
     public void Navigate(TabItem tab, string url)
