@@ -1,0 +1,78 @@
+using Dapper;
+using GuideAssistant.Models;
+
+namespace GuideAssistant.Data;
+
+public class HotkeyRepository
+{
+    private readonly Database _db;
+    public HotkeyRepository(Database db) => _db = db;
+
+    public List<HotkeyProfile> GetAllProfiles()
+    {
+        using var conn = _db.CreateConnection();
+        var profiles = conn.Query<HotkeyProfile>("SELECT * FROM hotkey_profiles ORDER BY is_default DESC, name").ToList();
+        foreach (var p in profiles)
+        {
+            p.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id", new { id = p.Id }).ToList();
+        }
+        return profiles;
+    }
+
+    public HotkeyProfile? GetDefaultProfile()
+    {
+        using var conn = _db.CreateConnection();
+        var profile = conn.QueryFirstOrDefault<HotkeyProfile>("SELECT * FROM hotkey_profiles WHERE is_default=1");
+        if (profile != null)
+            profile.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id", new { id = profile.Id }).ToList();
+        return profile;
+    }
+
+    public int AddProfile(HotkeyProfile p)
+    {
+        using var conn = _db.CreateConnection();
+        return conn.ExecuteScalar<int>(@"
+            INSERT INTO hotkey_profiles (name, game_id, is_default) VALUES (@Name, @GameId, @IsDefault);
+            SELECT last_insert_rowid();", p);
+    }
+
+    public void SaveBindings(int profileId, List<HotkeyBinding> bindings)
+    {
+        using var conn = _db.CreateConnection();
+        conn.Execute("DELETE FROM hotkey_bindings WHERE profile_id=@id", new { id = profileId });
+        foreach (var b in bindings)
+        {
+            b.ProfileId = profileId;
+            conn.Execute(@"
+                INSERT INTO hotkey_bindings (profile_id, action_name, action_display, modifiers, virtual_key, display_text)
+                VALUES (@ProfileId, @ActionName, @ActionDisplay, @Modifiers, @VirtualKey, @DisplayText)", b);
+        }
+    }
+
+    public void DeleteProfile(int id)
+    {
+        using var conn = _db.CreateConnection();
+        conn.Execute("DELETE FROM hotkey_bindings WHERE profile_id=@id", new { id });
+        conn.Execute("DELETE FROM hotkey_profiles WHERE id=@id", new { id });
+    }
+}
+
+public class WindowStateRepository
+{
+    private readonly Database _db;
+    public WindowStateRepository(Database db) => _db = db;
+
+    public WindowState? Get(string windowName)
+    {
+        using var conn = _db.CreateConnection();
+        return conn.QueryFirstOrDefault<WindowState>("SELECT * FROM window_states WHERE window_name=@name", new { name = windowName });
+    }
+
+    public void Save(WindowState state)
+    {
+        using var conn = _db.CreateConnection();
+        conn.Execute(@"
+            UPDATE window_states SET x=@X, y=@Y, width=@Width, height=@Height, opacity=@Opacity, is_always_on_top=@IsAlwaysOnTop
+            WHERE window_name=@WindowName", state);
+    }
+}

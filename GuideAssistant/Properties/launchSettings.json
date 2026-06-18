@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "GuideAssistant (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "GuideAssistant (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
