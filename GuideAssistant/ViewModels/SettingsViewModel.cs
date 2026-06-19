@@ -44,7 +44,7 @@ public partial class SettingsViewModel : ObservableObject
         _opacity = opacity;
         _opacityLabel = $"当前: {opacity * 100:F0}%";
 
-        SelectPageCommand = new RelayCommand<string>(p => SelectedPage = p);
+        SelectPageCommand = new RelayCommand<string>(p => { if (p != null) SelectedPage = p; });
         StartKeyCaptureCommand = new RelayCommand<HotkeyRow>(StartKeyCapture);
         ClearHotkeyCommand = new RelayCommand<HotkeyRow>(ClearHotkey);
 

@@ -99,9 +99,9 @@ public partial class MainViewModel : ObservableObject
     public SubtitleService SubtitleService => _subtitleService;
     public DirectionService DirectionService => _directionService;
 
-    private void NavigateToUrl(string url)
+    private void NavigateToUrl(string? url)
     {
-        if (_tabManager.ActiveTab == null) return;
+        if (url == null || _tabManager.ActiveTab == null) return;
         _tabManager.Navigate(_tabManager.ActiveTab, url);
         CurrentUrl = url;
         IsCurrentUrlBookmarked = _bookmarkService.IsUrlBookmarked(url);
@@ -114,8 +114,9 @@ public partial class MainViewModel : ObservableObject
     private void NavigateForward() => WeakReferenceMessenger.Default.Send(new WebViewActionMessage(WebViewAction.GoForward));
     private void NavigateRefresh() => WeakReferenceMessenger.Default.Send(new WebViewActionMessage(WebViewAction.Refresh));
 
-    private void SwitchToTab(string tabId)
+    private void SwitchToTab(string? tabId)
     {
+        if (tabId == null) return;
         var tab = _tabManager.Tabs.FirstOrDefault(t => t.Id == tabId);
         if (tab == null) return;
         _tabManager.ActiveTab = tab;
@@ -127,8 +128,9 @@ public partial class MainViewModel : ObservableObject
 
     private void AddTab() { var tab = _tabManager.AddTab(); SwitchToTab(tab.Id); }
 
-    private void CloseTab(string tabId)
+    private void CloseTab(string? tabId)
     {
+        if (tabId == null) return;
         _tabManager.CloseTab(tabId);
         WeakReferenceMessenger.Default.Send(new TabClosedMessage(tabId));
         if (_tabManager.ActiveTab != null)

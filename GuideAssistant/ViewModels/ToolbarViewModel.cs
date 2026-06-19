@@ -65,7 +65,7 @@ public partial class ToolbarViewModel : ObservableObject
     public event Action<TabItem>? TabSwitched;
     public event Action? BookmarksRefreshRequested;
 
-    private void Navigate(string input)
+    private void Navigate(string? input)
     {
         if (string.IsNullOrWhiteSpace(input)) return;
         input = input.Trim();
