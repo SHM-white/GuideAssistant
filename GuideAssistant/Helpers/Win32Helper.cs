@@ -72,6 +72,56 @@ public static class Win32Helper
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    public static extern IntPtr CreatePopupMenu();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    public static extern bool AppendMenuW(IntPtr hMenu, uint uFlags, uint uIDNewItem, string lpNewItem);
+
+    [DllImport("user32.dll")]
+    public static extern int TrackPopupMenu(IntPtr hMenu, uint uFlags, int x, int y, int nReserved, IntPtr hWnd, IntPtr prcRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool DestroyMenu(IntPtr hMenu);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    public const uint MF_STRING = 0x00000000;
+    public const uint TPM_RETURNCMD = 0x0100;
+    public const uint TPM_NONOTIFY = 0x0080;
+    public const uint WM_COMMAND = 0x0111;
+
+    /// <summary>
+    /// Shows a simple Win32 context menu at the cursor position. Returns 1-based selected index, or 0 if cancelled.
+    /// </summary>
+    public static uint ShowPopupMenu(IntPtr ownerHwnd, string[] items)
+    {
+        GetCursorPos(out var pt);
+        SetForegroundWindow(ownerHwnd);
+
+        var hMenu = CreatePopupMenu();
+        for (int i = 0; i < items.Length; i++)
+            AppendMenuW(hMenu, MF_STRING, (uint)(i + 1), items[i]);
+
+        var result = (uint)TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.X, pt.Y, 0, ownerHwnd, IntPtr.Zero);
+
+        DestroyMenu(hMenu);
+        PostMessage(ownerHwnd, 0, IntPtr.Zero, IntPtr.Zero);
+
+        return result;
+    }
+
     public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
     public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
     public const uint SWP_NOMOVE = 0x0002;

@@ -15,6 +15,13 @@ public sealed partial class ToolbarWindow : Window
     private readonly BookmarkService _bookmarkService;
     private readonly GameDetector _gameDetector;
     private bool _suppressSelectionChanged;
+    private bool _allowClose;
+
+    public void CloseForReal()
+    {
+        _allowClose = true;
+        Close();
+    }
 
     private readonly Dictionary<TreeViewNode, Bookmark> _bookmarkNodeMap = new();
 
@@ -47,6 +54,15 @@ public sealed partial class ToolbarWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 800, Height = 320 });
         var presenter = AppWindow.Presenter as OverlappedPresenter;
         if (presenter != null) presenter.IsAlwaysOnTop = true;
+
+        AppWindow.Closing += (sender, args) =>
+        {
+            if (_allowClose) return;
+            args.Cancel = true;
+            AppWindow.Hide();
+            Log.Information("ToolbarWindow hidden to tray");
+        };
+
         Closed += (s, e) => Log.Information("ToolbarWindow closed");
         Log.Information("ToolbarWindow initialized");
     }

@@ -35,11 +35,12 @@
                     Minimum="0.2" Maximum="1.0" StepFrequency="0.05"
                     Value="{x:Bind ViewModel.Opacity, Mode=TwoWay}"
                     Visibility="Collapsed" />
-            <Button x:Name="OpacityBtn" Width="36" Height="24"
+            <Button x:Name="RestoreToolsBtn" Width="36" Height="24"
                     Background="Transparent" BorderThickness="0"
                     Opacity="0.5" Padding="0"
-                    Click="OpacityBtn_Click">
-                <SymbolIcon Symbol="Setting" />
+                    Click="RestoreToolsBtn_Click"
+                    ToolTipService.ToolTip="恢复工具窗口">
+                <SymbolIcon Symbol="DockBottom" />
             </Button>
         </StackPanel>
     </Grid>

@@ -1,10 +1,12 @@
 using CommunityToolkit.Mvvm.Messaging;
+using CommunityToolkit.Mvvm.Input;
 using GuideAssistant.Controls;
 using GuideAssistant.Helpers;
 using GuideAssistant.Models;
 using GuideAssistant.Services;
 using GuideAssistant.ViewModels;
 using GuideAssistant.Views;
+using H.NotifyIcon;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -28,6 +30,8 @@ public sealed partial class MainWindow : Window
     private ToolbarWindow? _toolbarWindow;
     private SubtitleOverlay? _subtitleOverlay;
     private MiniMapOverlay? _miniMapOverlay;
+    private SettingsWindow? _settingsWindow;
+    private TaskbarIcon? _trayIcon;
     private IntPtr _hwnd;
     private System.Timers.Timer? _subtitleTimeSyncTimer;
 
@@ -75,6 +79,7 @@ public sealed partial class MainWindow : Window
         _gameDetector.Start();
 
         RegisterMessengerHandlers();
+        InitializeTrayIcon();
 
         try
         {
@@ -131,10 +136,42 @@ public sealed partial class MainWindow : Window
         Log.Information("MainWindow initialized");
     }
 
-    private void OpacityBtn_Click(object sender, RoutedEventArgs e)
+    private void RestoreToolsBtn_Click(object sender, RoutedEventArgs e)
     {
-        OpacitySlider.Visibility = OpacitySlider.Visibility == Visibility.Visible
-            ? Visibility.Collapsed : Visibility.Visible;
+        ShowToolbarWindow();
+
+        if (_viewModel.IsSubtitleEnabled && _subtitleOverlay is null)
+        {
+            _subtitleOverlay = new SubtitleOverlay(_subtitleService);
+            _subtitleOverlay.Closed += (s, e) => _subtitleOverlay = null;
+            _subtitleOverlay.Activate();
+            _subtitleService.StartSync();
+        }
+        if (_viewModel.IsMiniMapEnabled && _miniMapOverlay is null)
+        {
+            _miniMapOverlay = new MiniMapOverlay(_directionService);
+            _miniMapOverlay.Closed += (s, e) => _miniMapOverlay = null;
+            _miniMapOverlay.Activate();
+        }
+    }
+
+    private void ShowToolbarWindow()
+    {
+        try
+        {
+            if (_toolbarWindow is null)
+            {
+                _toolbarWindow = App.Services.GetRequiredService<ToolbarWindow>();
+                _toolbarWindow.Closed += (s, e) => _toolbarWindow = null;
+                _toolbarWindow.Activate();
+                ConnectToolbarViewModel();
+            }
+            else
+            {
+                _toolbarWindow.AppWindow.Show();
+            }
+        }
+        catch (Exception ex) { Log.Error(ex, "Failed to show ToolbarWindow"); }
     }
 
     private void InitializeWebView()
@@ -190,12 +227,12 @@ public sealed partial class MainWindow : Window
         {
             if (m.Type == "subtitle")
             {
-                if (m.Enabled) { _subtitleOverlay = new SubtitleOverlay(_subtitleService); _subtitleOverlay.Activate(); _subtitleService.StartSync(); }
+                if (m.Enabled) { _subtitleOverlay = new SubtitleOverlay(_subtitleService); _subtitleOverlay.Closed += (s, e) => _subtitleOverlay = null; _subtitleOverlay.Activate(); _subtitleService.StartSync(); }
                 else { _subtitleService.StopSync(); _subtitleOverlay?.Close(); _subtitleOverlay = null; }
             }
             else if (m.Type == "minimap")
             {
-                if (m.Enabled) { _miniMapOverlay = new MiniMapOverlay(_directionService); _miniMapOverlay.Activate(); }
+                if (m.Enabled) { _miniMapOverlay = new MiniMapOverlay(_directionService); _miniMapOverlay.Closed += (s, e) => _miniMapOverlay = null; _miniMapOverlay.Activate(); }
                 else { _miniMapOverlay?.Close(); _miniMapOverlay = null; }
             }
         });
@@ -235,6 +272,12 @@ public sealed partial class MainWindow : Window
 
     private void OpenSettingsWindow()
     {
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Activate();
+            return;
+        }
+
         var settingsVm = App.Services.GetRequiredService<SettingsViewModel>();
         settingsVm.PropertyChanged += (s, e) =>
         {
@@ -245,8 +288,9 @@ public sealed partial class MainWindow : Window
             else if (e.PropertyName == nameof(SettingsViewModel.Opacity))
                 WeakReferenceMessenger.Default.Send(new OpacityChangedMessage(settingsVm.Opacity));
         };
-        var settingsWindow = new SettingsWindow(settingsVm);
-        settingsWindow.Activate();
+        _settingsWindow = new SettingsWindow(settingsVm);
+        _settingsWindow.Closed += (s, e) => _settingsWindow = null;
+        _settingsWindow.Activate();
     }
 
     // ── Subtitle Time Sync ──────────────────────────────
@@ -277,6 +321,41 @@ public sealed partial class MainWindow : Window
     }
 
     private void StopSubtitleTimeSync() { _subtitleTimeSyncTimer?.Dispose(); _subtitleTimeSyncTimer = null; }
+
+    // ── Tray Icon ──────────────────────────────────────
+
+    private void InitializeTrayIcon()
+    {
+        _trayIcon = new TaskbarIcon
+        {
+            ToolTipText = "GuideAssistant",
+            IconSource = new GeneratedIconSource
+            {
+                Text = "GA",
+                FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Segoe UI"),
+                FontSize = 28,
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Colors.White),
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Windows.UI.Color.FromArgb(0xFF, 0x33, 0x88, 0xCC))
+            },
+            LeftClickCommand = new RelayCommand(() => ShowToolbarWindow()),
+            RightClickCommand = new RelayCommand(() =>
+            {
+                var result = Win32Helper.ShowPopupMenu(_hwnd, new[] { "打开工具窗口", "打开设置" });
+                switch (result)
+                {
+                    case 1:
+                        ShowToolbarWindow();
+                        break;
+                    case 2:
+                        OpenSettingsWindow();
+                        break;
+                }
+            })
+        };
+
+        RootGrid.Children.Add(_trayIcon);
+    }
 
     // ── Window State ────────────────────────────────────
 
@@ -310,7 +389,8 @@ public sealed partial class MainWindow : Window
         StopSubtitleTimeSync();
         _subtitleOverlay?.Close();
         _miniMapOverlay?.Close();
-        _toolbarWindow?.Close();
+        _toolbarWindow?.CloseForReal();
+        _settingsWindow?.Close();
         _viewModel.Cleanup();
         _gameDetector.Dispose();
         Log.Information("Application shutting down");
