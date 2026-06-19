@@ -106,7 +106,7 @@ public class HotkeyService : IDisposable
 
                 Log.Debug("Hotkey triggered: {Action} (VK={Key})", entry.action, vkCode);
                 entry.callback();
-                return (IntPtr)1;
+                return CallNextHookEx(_hookId, nCode, wParam, lParam);
             }
             else if (_bindings.Count > 0)
             {

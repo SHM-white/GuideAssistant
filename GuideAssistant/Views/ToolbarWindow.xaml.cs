@@ -5,6 +5,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Serilog;
+using System.Collections.ObjectModel;
 
 namespace GuideAssistant.Views;
 
@@ -23,7 +24,7 @@ public sealed partial class ToolbarWindow : Window
         Close();
     }
 
-    private readonly Dictionary<TreeViewNode, Bookmark> _bookmarkNodeMap = new();
+    private ObservableCollection<BookmarkTreeNode>? _bookmarkRootNodes;
 
     public ToolbarWindow(
         ToolbarViewModel viewModel,
@@ -161,9 +162,6 @@ public sealed partial class ToolbarWindow : Window
 
     private void RefreshBookmarksPanel()
     {
-        BookmarksTreeView.RootNodes.Clear();
-        _bookmarkNodeMap.Clear();
-
         var allBookmarks = string.IsNullOrWhiteSpace(_viewModel.BookmarkSearchText)
             ? _bookmarkService.GetAll()
             : _bookmarkService.Search(_viewModel.BookmarkSearchText);
@@ -171,34 +169,57 @@ public sealed partial class ToolbarWindow : Window
         var allGames = _bookmarkService.GetAllGames();
         var gameLookup = allGames.ToDictionary(g => g.Id, g => g.GameName);
 
+        _bookmarkRootNodes = new ObservableCollection<BookmarkTreeNode>();
+
         if (!string.IsNullOrWhiteSpace(_viewModel.BookmarkSearchText))
         {
-            var folderNode = new TreeViewNode { Content = $"🔍 搜索结果 ({allBookmarks.Count})", IsExpanded = true };
+            var searchFolder = new BookmarkTreeNode
+            {
+                IconGlyph = "\uE721",
+                Label = $"搜索结果 ({allBookmarks.Count})",
+                IsFolder = true
+            };
             foreach (var bm in allBookmarks)
             {
-                var node = new TreeViewNode { Content = $"📺 {bm.Title}\n   {bm.Url}" };
-                _bookmarkNodeMap[node] = bm;
-                folderNode.Children.Add(node);
+                searchFolder.Children.Add(new BookmarkTreeNode
+                {
+                    IconGlyph = "\uE7F4",
+                    Label = bm.Title,
+                    SubLabel = bm.Url,
+                    Bookmark = bm
+                });
             }
-            BookmarksTreeView.RootNodes.Add(folderNode);
-            return;
+            _bookmarkRootNodes.Add(searchFolder);
         }
-
-        var grouped = allBookmarks
-            .GroupBy(b => b.GameId.HasValue && gameLookup.ContainsKey(b.GameId.Value) ? gameLookup[b.GameId.Value] : "未分类")
-            .OrderBy(g => g.Key == "未分类" ? 1 : 0).ThenBy(g => g.Key);
-
-        foreach (var group in grouped)
+        else
         {
-            var folderNode = new TreeViewNode { Content = $"📁 {group.Key}  ({group.Count()})", IsExpanded = true };
-            foreach (var bm in group)
+            var grouped = allBookmarks
+                .GroupBy(b => b.GameId.HasValue && gameLookup.ContainsKey(b.GameId.Value) ? gameLookup[b.GameId.Value] : "未分类")
+                .OrderBy(g => g.Key == "未分类" ? 1 : 0).ThenBy(g => g.Key);
+
+            foreach (var group in grouped)
             {
-                var node = new TreeViewNode { Content = $"📺 {bm.Title}\n   {bm.Url}" };
-                _bookmarkNodeMap[node] = bm;
-                folderNode.Children.Add(node);
+                var folderNode = new BookmarkTreeNode
+                {
+                    IconGlyph = "\uE8B7",
+                    Label = $"{group.Key}  ({group.Count()})",
+                    IsFolder = true
+                };
+                foreach (var bm in group)
+                {
+                    folderNode.Children.Add(new BookmarkTreeNode
+                    {
+                        IconGlyph = "\uE7F4",
+                        Label = bm.Title,
+                        SubLabel = bm.Url,
+                        Bookmark = bm
+                    });
+                }
+                _bookmarkRootNodes.Add(folderNode);
             }
-            BookmarksTreeView.RootNodes.Add(folderNode);
         }
+
+        BookmarksTreeView.ItemsSource = _bookmarkRootNodes;
     }
 
     private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
@@ -209,8 +230,9 @@ public sealed partial class ToolbarWindow : Window
 
     private void BookmarksTreeView_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
     {
-        if (args.InvokedItem is TreeViewNode node && _bookmarkNodeMap.TryGetValue(node, out var bookmark))
+        if (args.InvokedItem is BookmarkTreeNode { Bookmark: not null } node)
         {
+            var bookmark = node.Bookmark;
             var tab = _tabManager.AddTab(bookmark.Url);
             _viewModel.SelectTabCommand.Execute(tab);
             NavBarControl.SetUrl(bookmark.Url);

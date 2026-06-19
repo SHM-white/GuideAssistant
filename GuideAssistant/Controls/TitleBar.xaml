@@ -32,19 +32,27 @@
             <Slider x:Name="OpacitySlider" Width="80" Height="32" VerticalAlignment="Center"
                     Minimum="0.2" Maximum="1.0" Value="0.9" StepFrequency="0.05"
                     Visibility="Collapsed" x:FieldModifier="public" />
-            <Button x:Name="OpacityBtn" Content="🔊" FontSize="13" Width="46" Height="32"
+            <Button x:Name="OpacityBtn" FontSize="13" Width="46" Height="32"
                     Background="Transparent" BorderThickness="0"
-                    Click="OpacityBtn_Click" />
+                    Click="OpacityBtn_Click">
+                <FontIcon Glyph="&#xE767;" FontSize="13" />
+            </Button>
 
-            <Button x:Name="MinimizeBtn" Content="─" FontSize="13" Width="46" Height="32"
+            <Button x:Name="MinimizeBtn" FontSize="13" Width="46" Height="32"
                     Background="Transparent" BorderThickness="0"
-                    Click="MinimizeBtn_Click" />
-            <Button x:Name="MaximizeBtn" Content="□" FontSize="13" Width="46" Height="32"
+                    Click="MinimizeBtn_Click">
+                <FontIcon Glyph="&#xE73F;" FontSize="10" />
+            </Button>
+            <Button x:Name="MaximizeBtn" FontSize="13" Width="46" Height="32"
                     Background="Transparent" BorderThickness="0"
-                    Click="MaximizeBtn_Click" />
-            <Button x:Name="CloseBtn" Content="✕" FontSize="14" Width="46" Height="32"
+                    Click="MaximizeBtn_Click">
+                <FontIcon Glyph="&#xE740;" FontSize="10" />
+            </Button>
+            <Button x:Name="CloseBtn" FontSize="14" Width="46" Height="32"
                     Background="Transparent" BorderThickness="0"
-                    Click="CloseBtn_Click" />
+                    Click="CloseBtn_Click">
+                <FontIcon Glyph="&#xE711;" FontSize="12" />
+            </Button>
         </StackPanel>
     </Grid>
 </UserControl>
