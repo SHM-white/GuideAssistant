@@ -39,6 +39,8 @@ public sealed partial class ToolbarWindow : Window
         // Auto-load the active tab's page on startup
         if (_tabManager.ActiveTab != null)
             _mainWindow.NavigateToUrl(_tabManager.ActiveTab.Url);
+
+        InitializeBookmarksPanel();
     }
 
     private void InitializeWindow()
@@ -212,29 +214,102 @@ public sealed partial class ToolbarWindow : Window
         };
     }
 
-    private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    private void InitializeBookmarksPanel()
     {
-        if (string.IsNullOrWhiteSpace(args.QueryText)) return;
+        _bookmarkService.BookmarksChanged += () =>
+            DispatcherQueue.TryEnqueue(RefreshBookmarksPanel);
 
-        var results = _bookmarkService.Search(args.QueryText);
-        if (results.Count > 0)
+        RefreshBookmarksPanel();
+    }
+
+    private readonly Dictionary<TreeViewNode, Bookmark> _bookmarkNodeMap = new();
+
+    private void RefreshBookmarksPanel()
+    {
+        BookmarksTreeView.RootNodes.Clear();
+        _bookmarkNodeMap.Clear();
+
+        var allBookmarks = _bookmarkService.GetAll();
+        var allGames = _bookmarkService.GetAllGames();
+        var gameLookup = allGames.ToDictionary(g => g.Id, g => g.GameName);
+
+        var grouped = allBookmarks
+            .GroupBy(b => b.GameId.HasValue && gameLookup.ContainsKey(b.GameId.Value)
+                ? gameLookup[b.GameId.Value]
+                : "未分类")
+            .OrderBy(g => g.Key == "未分类" ? 1 : 0)
+            .ThenBy(g => g.Key);
+
+        foreach (var group in grouped)
         {
-            BookmarkResultsList.ItemsSource = results;
-            BookmarkResultsList.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            ShowDialog("搜索", "未找到匹配的收藏项");
+            var folderNode = new TreeViewNode
+            {
+                Content = $"📁 {group.Key}  ({group.Count()})",
+                IsExpanded = true
+            };
+
+            foreach (var bm in group)
+            {
+                var node = new TreeViewNode
+                {
+                    Content = $"📺 {bm.Title}\n   {bm.Url}"
+                };
+                _bookmarkNodeMap[node] = bm;
+                folderNode.Children.Add(node);
+            }
+
+            BookmarksTreeView.RootNodes.Add(folderNode);
         }
     }
 
-    private void BookmarkResults_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
-        if (BookmarkResultsList.SelectedItem is Bookmark bookmark)
+        if (string.IsNullOrWhiteSpace(args.QueryText))
         {
-            _mainWindow.NavigateToUrl(bookmark.Url);
+            RefreshBookmarksPanel();
+            return;
+        }
+
+        var results = _bookmarkService.Search(args.QueryText);
+        BookmarksTreeView.RootNodes.Clear();
+        _bookmarkNodeMap.Clear();
+
+        if (results.Count > 0)
+        {
+            var folderNode = new TreeViewNode
+            {
+                Content = $"🔍 搜索结果 ({results.Count})",
+                IsExpanded = true
+            };
+
+            foreach (var bm in results)
+            {
+                var node = new TreeViewNode
+                {
+                    Content = $"📺 {bm.Title}\n   {bm.Url}"
+                };
+                _bookmarkNodeMap[node] = bm;
+                folderNode.Children.Add(node);
+            }
+
+            BookmarksTreeView.RootNodes.Add(folderNode);
+        }
+        else
+        {
+            var node = new TreeViewNode { Content = "未找到匹配的收藏项" };
+            BookmarksTreeView.RootNodes.Add(node);
+        }
+    }
+
+    private void BookmarksTreeView_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItem is TreeViewNode node && _bookmarkNodeMap.TryGetValue(node, out var bookmark))
+        {
+            var tab = _tabManager.AddTab(bookmark.Url);
+            _mainWindow.SwitchToTabById(tab.Id);
             NavBarControl.SetUrl(bookmark.Url);
-            BookmarkResultsList.Visibility = Visibility.Collapsed;
+            RefreshTabList();
+            SelectActiveTab();
         }
     }
 

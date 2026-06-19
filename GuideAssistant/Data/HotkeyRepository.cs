@@ -1,5 +1,6 @@
 using Dapper;
 using GuideAssistant.Models;
+using Serilog;
 
 namespace GuideAssistant.Data;
 
@@ -39,14 +40,23 @@ public class HotkeyRepository
     public void SaveBindings(int profileId, List<HotkeyBinding> bindings)
     {
         using var conn = _db.CreateConnection();
-        conn.Execute("DELETE FROM hotkey_bindings WHERE profile_id=@id", new { id = profileId });
+        using var tx = conn.BeginTransaction();
+        conn.Execute("DELETE FROM hotkey_bindings WHERE profile_id=@id", new { id = profileId }, tx);
+        var seen = new HashSet<string>();
+        int saved = 0, skipped = 0;
         foreach (var b in bindings)
         {
+            if (string.IsNullOrEmpty(b.ActionName)) { skipped++; continue; }
+            if (!seen.Add(b.ActionName)) { skipped++; continue; }
             b.ProfileId = profileId;
             conn.Execute(@"
                 INSERT INTO hotkey_bindings (profile_id, action_name, action_display, modifiers, virtual_key, display_text)
-                VALUES (@ProfileId, @ActionName, @ActionDisplay, @Modifiers, @VirtualKey, @DisplayText)", b);
+                VALUES (@ProfileId, @ActionName, @ActionDisplay, @Modifiers, @VirtualKey, @DisplayText)", b, tx);
+            saved++;
         }
+        tx.Commit();
+        Log.Information("SaveBindings: profile={ProfileId}, total={Total}, saved={Saved}, skipped={Skipped}",
+            profileId, bindings.Count, saved, skipped);
     }
 
     public void DeleteProfile(int id)

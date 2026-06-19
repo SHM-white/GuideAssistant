@@ -27,32 +27,32 @@
             <ScrollViewer x:Name="HotkeysPage" Visibility="Visible">
             <StackPanel Spacing="8" Padding="24,16">
                 <TextBlock Text="自定义快捷键" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
-                <TextBlock Text="点击右侧按钮，然后按下你想要的按键来绑定。" FontSize="12" Opacity="0.6" Margin="0,0,0,8" />
+                <TextBlock Text="点击快捷键进入绑定，按 Esc 取消。" FontSize="12" Opacity="0.6" Margin="0,0,0,8" />
                 <ListView x:Name="HotkeyList" SelectionMode="None">
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:HotkeyRow">
                             <Grid Padding="4,6" ColumnSpacing="12">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="{x:Bind DisplayName}" FontSize="14" VerticalAlignment="Center" />
-                                <Button Grid.Column="1"
-                                        Content="{x:Bind CurrentBinding}" FontSize="13" Height="32"
-                                        HorizontalAlignment="Stretch"
-                                        Click="HotkeyRebind_Click" />
+                                <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" FontSize="14" VerticalAlignment="Center" />
+                                <HyperlinkButton Grid.Column="1"
+                                                 Content="{x:Bind CurrentBinding, Mode=OneWay}"
+                                                 FontSize="13" MinWidth="80"
+                                                 HorizontalAlignment="Right"
+                                                 Click="HotkeyRebind_Click" />
                                 <Button Grid.Column="2" Content="X" FontSize="12"
-                                        Width="32" Height="32" Padding="0"
+                                        Width="28" Height="28" Padding="0"
                                         Background="Transparent" BorderThickness="0"
                                         Opacity="0.4"
-                                        Click="HotkeyClear_Click" />
+                                        Click="HotkeyClear_Click"
+                                        ToolTipService.ToolTip="清除快捷键" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
-                <TextBlock x:Name="CaptureHint" FontSize="12" Opacity="0" Margin="0,4,0,0"
-                           Text="正在等待按键... 按 Esc 取消" />
             </StackPanel>
         </ScrollViewer>
 
@@ -77,6 +77,24 @@
                 <TextBlock Text="基于 WinUI 3 + WebView2 构建" FontSize="12" Opacity="0.5" />
             </StackPanel>
         </ScrollViewer>
+
+        <!-- Keyboard capture overlay -->
+        <Grid x:Name="KeyCaptureOverlay" Visibility="Collapsed"
+              Background="#80000000" KeyDown="KeyCaptureOverlay_KeyDown"
+              IsTabStop="True"
+              HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <Border Background="{ThemeResource CardBackgroundFillColorDefault}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefault}"
+                    BorderThickness="1" CornerRadius="8"
+                    Padding="32" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    MinWidth="300">
+                <StackPanel Spacing="8" HorizontalAlignment="Center">
+                    <TextBlock x:Name="KeyCaptureTitle" FontSize="16" FontWeight="SemiBold" TextAlignment="Center" />
+                    <TextBlock Text="请按下想要绑定的按键…" FontSize="14" TextAlignment="Center" Opacity="0.8" />
+                    <TextBlock Text="按 Esc 取消" FontSize="12" TextAlignment="Center" Opacity="0.5" />
+                </StackPanel>
+            </Border>
+        </Grid>
         </Grid>
         </NavigationView.Content>
     </NavigationView>

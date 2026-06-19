@@ -18,88 +18,89 @@
             <ColumnDefinition Width="200" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
         <!-- Left: Vertical Tab List -->
-        <Grid Grid.Column="0" Background="{ThemeResource SystemChromeMediumLowColor}">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+        <ListView x:Name="TabListView" Grid.Row="1" Grid.Column="0"
+                    SelectionMode="Single"
+                    SelectionChanged="TabListView_SelectionChanged">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <Grid Padding="8,6" ColumnSpacing="4" Height="36">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
 
-            <ListView x:Name="TabListView" Grid.Row="0"
-                      SelectionMode="Single"
-                      SelectionChanged="TabListView_SelectionChanged">
-                <ListView.ItemTemplate>
-                    <DataTemplate>
-                        <Grid Padding="8,6" ColumnSpacing="4" Height="36">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Title}"
+                                    FontSize="12"
+                                    TextTrimming="CharacterEllipsis"
+                                    VerticalAlignment="Center" />
 
-                            <TextBlock Text="{Binding Title}"
-                                       FontSize="12"
-                                       TextTrimming="CharacterEllipsis"
-                                       VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Width="28" Height="28"
+                                Background="Transparent" BorderThickness="0"
+                                Padding="2" VerticalAlignment="Center"
+                                Click="TabFavoriteBtn_Click">
+                            <SymbolIcon x:Name="TabFavIcon" Symbol="OutlineStar" />
+                        </Button>
 
-                            <Button Grid.Column="1" Width="28" Height="28"
-                                    Background="Transparent" BorderThickness="0"
-                                    Padding="2" VerticalAlignment="Center"
-                                    Click="TabFavoriteBtn_Click">
-                                <SymbolIcon x:Name="TabFavIcon" Symbol="OutlineStar" />
-                            </Button>
+                        <Button Grid.Column="2" Width="28" Height="28"
+                                Background="Transparent" BorderThickness="0"
+                                Padding="2" VerticalAlignment="Center"
+                                Click="TabCloseBtn_Click">
+                            <SymbolIcon Symbol="Cancel" />
+                        </Button>
+                    </Grid>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
 
-                            <Button Grid.Column="2" Width="28" Height="28"
-                                    Background="Transparent" BorderThickness="0"
-                                    Padding="2" VerticalAlignment="Center"
-                                    Click="TabCloseBtn_Click">
-                                <SymbolIcon Symbol="Cancel" />
-                            </Button>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
+        <!-- New Tab button -->
+        <Button Grid.Row="2" Grid.Column="0" Height="32" Margin="4"
+                Background="Transparent" BorderThickness="0"
+                HorizontalAlignment="Stretch"
+                Click="NewTabBtn_Click">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <SymbolIcon Symbol="Add" />
+                <TextBlock Text="新标签页" FontSize="12" Margin="4,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+        </Button>
 
-            <!-- New Tab button -->
-            <Button Grid.Row="1" Height="32" Margin="4"
-                    Background="Transparent" BorderThickness="0"
-                    HorizontalAlignment="Stretch"
-                    Click="NewTabBtn_Click">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <SymbolIcon Symbol="Add" />
-                    <TextBlock Text="新标签页" FontSize="12" Margin="4,0,0,0" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
-        </Grid>
+        <!-- Right: Navigation + Favorites -->
+            <controls:NavigationBar x:Name="NavBarControl" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2"/>
 
-        <!-- Right: Navigation + Search -->
-        <Grid Grid.Column="1" RowSpacing="0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+            <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="1" Margin="8,4,8,8"
+                    Background="{ThemeResource SystemChromeMediumLowColor}"
+                    CornerRadius="6">
+                <Grid RowSpacing="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
-            <controls:NavigationBar x:Name="NavBarControl" Grid.Row="0" />
+                    <Grid Grid.Row="0" Padding="8,6" ColumnSpacing="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="📁 收藏夹" FontWeight="SemiBold" FontSize="13"
+                                   VerticalAlignment="Center" />
+                        <AutoSuggestBox x:Name="SearchBox" Grid.Column="1"
+                                        PlaceholderText="搜索..."
+                                        Width="160" Height="28" FontSize="12"
+                                        QuerySubmitted="SearchBox_QuerySubmitted" />
+                    </Grid>
 
-            <AutoSuggestBox x:Name="SearchBox" Grid.Row="1"
-                            PlaceholderText="搜索收藏夹..."
-                            Height="30" FontSize="12" Margin="8,4"
-                            QuerySubmitted="SearchBox_QuerySubmitted" />
-
-            <ListView Grid.Row="2" x:Name="BookmarkResultsList" Margin="8,0"
-                      Visibility="Collapsed"
-                      SelectionChanged="BookmarkResults_SelectionChanged">
-                <ListView.ItemTemplate>
-                    <DataTemplate>
-                        <StackPanel Margin="4">
-                            <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding Url}" FontSize="11" Opacity="0.7" />
-                        </StackPanel>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-        </Grid>
+                    <TreeView x:Name="BookmarksTreeView" Grid.Row="1"
+                              Margin="4,0,4,4"
+                              SelectionMode="Single"
+                              ItemInvoked="BookmarksTreeView_ItemInvoked" />
+                </Grid>
+            </Border>
     </Grid>
 </Window>

@@ -1,6 +1,5 @@
 using GuideAssistant.Controls;
 using GuideAssistant.Data;
-using GuideAssistant.Helpers;
 using GuideAssistant.Models;
 using GuideAssistant.Services;
 using GuideAssistant.Views;
@@ -66,17 +65,6 @@ public sealed partial class MainWindow : Window
         _hotkeyRepository = hotkeyRepository;
         _windowStateRepo = windowStateRepo;
 
-        // Refresh bookmarks panel when bookmarks change
-        _bookmarkService.BookmarksChanged += () =>
-        {
-            if (BookmarksPanel.Visibility == Visibility.Visible)
-                DispatcherQueue.TryEnqueue(RefreshBookmarksPanel);
-        };
-
-        // Show bookmarks panel by default
-        RefreshBookmarksPanel();
-        BookmarksPanel.Visibility = Visibility.Visible;
-
         _hwnd = WindowNative.GetWindowHandle(this);
         _windowManager.MainWindowHandle = _hwnd;
 
@@ -110,15 +98,15 @@ public sealed partial class MainWindow : Window
         titleBar.ExtendsContentIntoTitleBar = true;
         titleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
 
-        // Make system title bar elements fully transparent
+        // Make system title bar button backgrounds transparent (invisible but functional)
         titleBar.ButtonBackgroundColor = Colors.Transparent;
         titleBar.ButtonForegroundColor = Colors.Transparent;
         titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
         titleBar.ButtonInactiveForegroundColor = Colors.Transparent;
-        titleBar.ButtonHoverBackgroundColor = Colors.Transparent;
-        titleBar.ButtonHoverForegroundColor = Colors.Transparent;
-        titleBar.ButtonPressedBackgroundColor = Colors.Transparent;
-        titleBar.ButtonPressedForegroundColor = Colors.Transparent;
+        //titleBar.ButtonHoverBackgroundColor = Colors.Transparent;
+        //titleBar.ButtonHoverForegroundColor = Colors.Transparent;
+        //titleBar.ButtonPressedBackgroundColor = Colors.Transparent;
+        //titleBar.ButtonPressedForegroundColor = Colors.Transparent;
 
         // Remove system title text and icon
         AppWindow.Title = "";
@@ -135,34 +123,12 @@ public sealed partial class MainWindow : Window
 
         AppWindow.Show();
 
-        // Hide system caption buttons — call immediately + after activation + delayed retry
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            Helpers.Win32Helper.HideSystemCaptionButtons(_hwnd);
-        });
-        Activated += (s, e) =>
-        {
-            Helpers.Win32Helper.HideSystemCaptionButtons(_hwnd);
-        };
-
         Log.Information("MainWindow initialized");
     }
 
     private void InitializeControls()
     {
-        // Wire floating window buttons
-        MinimizeBtn.Click += (s, e) =>
-            (AppWindow.Presenter as OverlappedPresenter)?.Minimize();
-        MaximizeBtn.Click += (s, e) =>
-        {
-            var p = AppWindow.Presenter as OverlappedPresenter;
-            if (p != null)
-            {
-                if (p.State == OverlappedPresenterState.Maximized) p.Restore();
-                else p.Maximize();
-            }
-        };
-        CloseBtn.Click += (s, e) => Close();
+        // Wire opacity button
         OpacityBtn.Click += (s, e) =>
         {
             OpacitySlider.Visibility = OpacitySlider.Visibility == Visibility.Visible
@@ -172,11 +138,8 @@ public sealed partial class MainWindow : Window
         OpacitySlider.ValueChanged += (s, e) =>
             _windowManager.SetOpacity(_hwnd, e.NewValue);
 
-        // Hover transparency for window buttons
+        // Hover transparency for opacity button
         ApplyHoverTransparency(OpacityBtn);
-        ApplyHoverTransparency(MinimizeBtn);
-        ApplyHoverTransparency(MaximizeBtn);
-        ApplyHoverTransparency(CloseBtn);
 
         WebViewControl.Initialize(_tabManager);
         WebViewControl.TitleChanged += (title) => TitleChanged?.Invoke(title);
@@ -241,78 +204,6 @@ public sealed partial class MainWindow : Window
 
     public string? GetCurrentTitle() => _tabManager.ActiveTab?.Title;
 
-    public bool IsCurrentUrlBookmarked()
-    {
-        var url = _tabManager.ActiveTab?.Url;
-        return url != null && _bookmarkService.IsUrlBookmarked(url);
-    }
-
-    public void ToggleBookmarksPanel()
-    {
-        if (BookmarksPanel.Visibility == Visibility.Visible)
-            BookmarksPanel.Visibility = Visibility.Collapsed;
-        else
-        {
-            RefreshBookmarksPanel();
-            BookmarksPanel.Visibility = Visibility.Visible;
-        }
-    }
-
-    private void RefreshBookmarksPanel()
-    {
-        BookmarksTreeView.RootNodes.Clear();
-
-        var allBookmarks = _bookmarkService.GetAll();
-        var allGames = _bookmarkService.GetAllGames();
-        var gameLookup = allGames.ToDictionary(g => g.Id, g => g.GameName);
-
-        // Group bookmarks by game, ungrouped go to "未分类"
-        var grouped = allBookmarks
-            .GroupBy(b => b.GameId.HasValue && gameLookup.ContainsKey(b.GameId.Value)
-                ? gameLookup[b.GameId.Value]
-                : "未分类")
-            .OrderBy(g => g.Key == "未分类" ? 1 : 0)
-            .ThenBy(g => g.Key);
-
-        foreach (var group in grouped)
-        {
-            var folderNode = new TreeViewNode
-            {
-                Content = $"📁 {group.Key}  ({group.Count()})",
-                IsExpanded = true
-            };
-
-            foreach (var bm in group)
-            {
-                var itemNode = new TreeViewNode
-                {
-                    Content = bm
-                };
-                folderNode.Children.Add(itemNode);
-            }
-
-            BookmarksTreeView.RootNodes.Add(folderNode);
-        }
-    }
-
-    private void BookmarksTreeView_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
-    {
-        if (args.InvokedItem is Bookmark bookmark)
-        {
-            NavigateToUrl(bookmark.Url);
-        }
-    }
-
-    private void BookmarksPanelClose_Click(object sender, RoutedEventArgs e)
-    {
-        BookmarksPanel.Visibility = Visibility.Collapsed;
-    }
-
-    private void BookmarksToggleBtn_Click(object sender, RoutedEventArgs e)
-    {
-        ToggleBookmarksPanel();
-    }
-
     public async Task<string> ExecuteWebScript(string script)
         => await WebViewControl.ExecuteScript(script);
 
@@ -354,7 +245,6 @@ public sealed partial class MainWindow : Window
     {
         var settingsWindow = new SettingsWindow(
             _hotkeyRepository,
-            _hotkeyService,
             _isSubtitleEnabled,
             _isMiniMapEnabled,
             onHotkeysChanged: ReloadHotkeys,
@@ -379,54 +269,18 @@ public sealed partial class MainWindow : Window
 
     private void ReloadHotkeys()
     {
-        // Unregister all current hotkeys
-        foreach (var id in _hotkeyService.GetRegisteredIds())
-            _hotkeyService.UnregisterHotkey(id);
-
-        // Re-register from saved profile
         var profile = _hotkeyRepository.GetDefaultProfile();
-        if (profile?.Bindings.Count > 0)
-        {
-            foreach (var b in profile.Bindings)
-            {
-                if (b.VirtualKey != 0)
-                    _hotkeyService.RegisterHotkey(b.ActionName, b.Modifiers, b.VirtualKey, () => HandleHotkeyAction(b.ActionName));
-            }
-        }
-
-        // Update the low-level hook mapping dynamically — force a restart
-        _hotkeyService.StopLowLevelHook();
-        _hotkeyService.StartLowLevelHook((vkCode) =>
-        {
-            var binding = profile?.Bindings.FirstOrDefault(b => b.VirtualKey == (uint)vkCode);
-            if (binding != null)
-                HandleHotkeyAction(binding.ActionName);
-        });
-
+        _hotkeyService.SetBindings(profile?.Bindings ?? new());
         Log.Information("Hotkeys reloaded from profile");
     }
 
     private void InitializeHotkeys()
     {
-        _hotkeyService.Initialize(_hwnd);
+        _hotkeyService.HotkeyTriggered += HandleHotkeyAction;
 
         var profile = _hotkeyRepository.GetDefaultProfile();
-        if (profile?.Bindings.Count > 0)
-        {
-            foreach (var b in profile.Bindings)
-            {
-                if (b.VirtualKey != 0)
-                    _hotkeyService.RegisterHotkey(b.ActionName, b.Modifiers, b.VirtualKey, () => HandleHotkeyAction(b.ActionName));
-            }
-        }
-
-        _hotkeyService.StartLowLevelHook((vkCode) =>
-        {
-            var profile = _hotkeyRepository.GetDefaultProfile();
-            var binding = profile?.Bindings.FirstOrDefault(b => b.VirtualKey == (uint)vkCode);
-            if (binding != null)
-                HandleHotkeyAction(binding.ActionName);
-        });
+        _hotkeyService.SetBindings(profile?.Bindings ?? new());
+        _hotkeyService.Start();
     }
 
     private async void HandleHotkeyAction(string action)

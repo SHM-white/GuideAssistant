@@ -42,6 +42,10 @@ public class BookmarkService
 
     public int QuickAdd(string title, string url, string? tags = null, int? gameId = null)
     {
+        // Fall back to URL if title is empty or just a placeholder
+        if (string.IsNullOrWhiteSpace(title) || title == "新标签页")
+            title = url;
+
         var b = new Bookmark
         {
             Title = title,

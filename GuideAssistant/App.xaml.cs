@@ -66,26 +66,57 @@ namespace GuideAssistant
 
         private static void EnsureDefaultHotkeys(HotkeyRepository repo)
         {
-            if (repo.GetDefaultProfile() != null) return;
+            var profile = repo.GetDefaultProfile();
+            if (profile == null)
+            {
+                profile = new Models.HotkeyProfile
+                {
+                    Name = "默认方案",
+                    IsDefault = true
+                };
+                profile.Id = repo.AddProfile(profile);
+            }
 
-            var profile = new Models.HotkeyProfile
+            // Only seed defaults for actions that have no key assigned
+            var defaults = new Dictionary<string, (uint vk, string display, string actionDisplay)>
             {
-                Name = "默认方案",
-                IsDefault = true
+                ["play_pause"]        = (0xC0, "`", "播放/暂停"),
+                ["fast_forward"]      = (0x36, "6", "快进"),
+                ["fast_backward"]     = (0x35, "5", "快退"),
+                ["volume_up"]         = (0x39, "9", "音量+"),
+                ["volume_down"]       = (0x38, "8", "音量-"),
+                ["toggle_visibility"] = (0x48, "H", "显示/隐藏"),
+                ["bookmark_page"]     = (0x42, "B", "收藏页面"),
+                ["toggle_subtitle"]   = (0x53, "S", "字幕切换"),
+                ["toggle_minimap"]    = (0x4D, "M", "小地图切换"),
             };
-            var id = repo.AddProfile(profile);
-            repo.SaveBindings(id, new()
+
+            bool needsSave = false;
+            foreach (var kv in defaults)
             {
-                new() { ActionName = "play_pause", ActionDisplay = "播放/暂停" },
-                new() { ActionName = "fast_forward", ActionDisplay = "快进" },
-                new() { ActionName = "fast_backward", ActionDisplay = "快退" },
-                new() { ActionName = "volume_up", ActionDisplay = "音量+" },
-                new() { ActionName = "volume_down", ActionDisplay = "音量-" },
-                new() { ActionName = "toggle_visibility", ActionDisplay = "隐藏/显示窗口" },
-                new() { ActionName = "bookmark_page", ActionDisplay = "收藏页面" },
-                new() { ActionName = "toggle_subtitle", ActionDisplay = "字幕切换" },
-                new() { ActionName = "toggle_minimap", ActionDisplay = "小地图切换" },
-            });
+                var binding = profile.Bindings.FirstOrDefault(b => b.ActionName == kv.Key);
+                if (binding == null)
+                {
+                    profile.Bindings.Add(new Models.HotkeyBinding
+                    {
+                        ActionName = kv.Key,
+                        ActionDisplay = kv.Value.actionDisplay,
+                        VirtualKey = kv.Value.vk,
+                        DisplayText = kv.Value.display,
+                    });
+                    needsSave = true;
+                }
+                else if (binding.VirtualKey == 0)
+                {
+                    binding.VirtualKey = kv.Value.vk;
+                    binding.DisplayText = kv.Value.display;
+                    binding.ActionDisplay = kv.Value.actionDisplay;
+                    needsSave = true;
+                }
+            }
+
+            if (needsSave)
+                repo.SaveBindings(profile.Id, profile.Bindings);
         }
 
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)

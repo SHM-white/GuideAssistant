@@ -103,6 +103,40 @@ public class Database
             VALUES ('ToolbarWindow', 100, 0, 600, 40, 1.0, 1);
         ";
         cmd.ExecuteNonQuery();
+
+        // One-time rebuild of bookmarks table
+        RebuildBookmarksIfNeeded(conn);
+
         Log.Information("Database initialized");
+    }
+
+    private static void RebuildBookmarksIfNeeded(SqliteConnection conn)
+    {
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = "SELECT value FROM settings WHERE key = 'db_version'";
+        var currentVersion = checkCmd.ExecuteScalar() as string;
+
+        if (currentVersion != "2")
+        {
+            using var rebuildCmd = conn.CreateCommand();
+            rebuildCmd.CommandText = @"
+                DROP TABLE IF EXISTS bookmarks;
+                CREATE TABLE bookmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    favicon_url TEXT,
+                    tags TEXT,
+                    notes TEXT,
+                    is_favorite INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '2');
+            ";
+            rebuildCmd.ExecuteNonQuery();
+            Log.Information("Bookmarks table rebuilt (db_version migrated to 2)");
+        }
     }
 }

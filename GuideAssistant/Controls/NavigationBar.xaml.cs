@@ -25,7 +25,7 @@ public sealed partial class NavigationBar : UserControl
 
     public void SetBookmarkState(bool isBookmarked)
     {
-        BookmarkBtn.Content = isBookmarked ? "★" : "☆";
+        BookmarkIcon.Symbol = isBookmarked ? Symbol.SolidStar : Symbol.OutlineStar;
     }
 
     private void UrlBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)

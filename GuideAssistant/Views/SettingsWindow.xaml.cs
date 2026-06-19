@@ -5,6 +5,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Serilog;
 
 namespace GuideAssistant.Views;
@@ -12,7 +13,6 @@ namespace GuideAssistant.Views;
 public sealed partial class SettingsWindow : Window
 {
     private readonly HotkeyRepository _hotkeyRepo;
-    private readonly HotkeyService _hotkeyService;
     private readonly Action? _onHotkeysChanged;
     private int _capturingActionIndex;
     private bool _isSubtitleEnabled;
@@ -23,21 +23,10 @@ public sealed partial class SettingsWindow : Window
     private readonly Action<double>? _setOpacity;
 
     private static readonly (string ActionName, string DisplayName)[] ActionDefs =
-    {
-        ("play_pause",       "播放 / 暂停"),
-        ("fast_forward",     "快进"),
-        ("fast_backward",    "快退"),
-        ("volume_up",        "音量 +"),
-        ("volume_down",      "音量 -"),
-        ("toggle_visibility","隐藏 / 显示窗口"),
-        ("bookmark_page",    "收藏页面"),
-        ("toggle_subtitle",  "字幕切换"),
-        ("toggle_minimap",   "小地图切换"),
-    };
+        HotkeyService.KnownActions.Select(a => (a.ActionName, a.DisplayName)).ToArray();
 
     public SettingsWindow(
         HotkeyRepository hotkeyRepo,
-        HotkeyService hotkeyService,
         bool isSubtitleEnabled,
         bool isMiniMapEnabled,
         Action? onHotkeysChanged = null,
@@ -49,7 +38,6 @@ public sealed partial class SettingsWindow : Window
         InitializeComponent();
 
         _hotkeyRepo = hotkeyRepo;
-        _hotkeyService = hotkeyService;
         _onHotkeysChanged = onHotkeysChanged;
         _isSubtitleEnabled = isSubtitleEnabled;
         _isMiniMapEnabled = isMiniMapEnabled;
@@ -103,6 +91,11 @@ public sealed partial class SettingsWindow : Window
     private List<HotkeyRow> BuildHotkeyRows()
     {
         var profile = _hotkeyRepo.GetDefaultProfile();
+        var bindingsInfo = profile != null
+            ? string.Join(", ", profile.Bindings.Select(b => $"{b.ActionName}={b.VirtualKey}"))
+            : "null";
+        Log.Information("BuildHotkeyRows: profile={ProfileId}, bindings=[{Bindings}]",
+            profile?.Id ?? -1, bindingsInfo);
         var rows = new List<HotkeyRow>();
         foreach (var def in ActionDefs)
         {
@@ -121,32 +114,50 @@ public sealed partial class SettingsWindow : Window
 
     private void LoadHotkeys()
     {
+        HotkeyList.ItemsSource = null;
         HotkeyList.ItemsSource = BuildHotkeyRows();
     }
 
     private void HotkeyRebind_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button btn && btn.DataContext is HotkeyRow row)
-        {
-            int idx = Array.FindIndex(ActionDefs, a => a.ActionName == row.ActionName);
-            if (idx < 0) return;
+        if (sender is not HyperlinkButton btn || btn.DataContext is not HotkeyRow row)
+            return;
 
-            _capturingActionIndex = idx;
-            btn.Content = "按下按键…";
-            btn.IsEnabled = false;
-            CaptureHint.Opacity = 1;
+        int idx = Array.FindIndex(ActionDefs, a => a.ActionName == row.ActionName);
+        if (idx < 0) return;
 
-            if (Content is FrameworkElement fe)
-                fe.KeyDown += SettingsWindow_KeyDown;
-        }
+        _capturingActionIndex = idx;
+        KeyCaptureTitle.Text = $"绑定快捷键 — {row.DisplayName}";
+        KeyCaptureOverlay.Visibility = Visibility.Visible;
+        KeyCaptureOverlay.Focus(FocusState.Keyboard);
     }
 
-    private void FinishCapture()
+    private void KeyCaptureOverlay_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (Content is FrameworkElement fe)
-            fe.KeyDown -= SettingsWindow_KeyDown;
+        e.Handled = true;
 
-        CaptureHint.Opacity = 0;
+        if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            Log.Debug("Key capture cancelled via Escape");
+            KeyCaptureOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        uint vk = (uint)(int)e.Key;
+        Log.Information("Key captured: VK={VirtualKey}, ActionIndex={ActionIndex}", vk, _capturingActionIndex);
+        KeyCaptureOverlay.Visibility = Visibility.Collapsed;
+
+        try
+        {
+            SaveHotkeyBinding(_capturingActionIndex, vk);
+            _onHotkeysChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to save hotkey binding (VK={VirtualKey})", vk);
+        }
+
+        HotkeyList.ItemsSource = null;
         HotkeyList.ItemsSource = BuildHotkeyRows();
     }
 
@@ -164,6 +175,7 @@ public sealed partial class SettingsWindow : Window
                 binding.VirtualKey = 0;
                 binding.DisplayText = "";
                 _hotkeyRepo.SaveBindings(profile.Id, profile.Bindings);
+                HotkeyList.ItemsSource = null;
                 HotkeyList.ItemsSource = BuildHotkeyRows();
                 _onHotkeysChanged?.Invoke();
                 Log.Information("Hotkey cleared: {Action}", row.ActionName);
@@ -171,26 +183,14 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
-    private void SettingsWindow_KeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
-    {
-        e.Handled = true;
-
-        if (e.Key == Windows.System.VirtualKey.Escape)
-        {
-            FinishCapture();
-            return;
-        }
-
-        int vkCode = (int)e.Key;
-        SaveHotkeyBinding(_capturingActionIndex, (uint)vkCode);
-        _onHotkeysChanged?.Invoke();
-        FinishCapture();
-    }
-
     private void SaveHotkeyBinding(int actionIndex, uint virtualKey)
     {
         var profile = _hotkeyRepo.GetDefaultProfile();
-        if (profile == null) return;
+        if (profile == null)
+        {
+            Log.Warning("SaveHotkeyBinding: no default profile found");
+            return;
+        }
 
         var actionName = ActionDefs[actionIndex].ActionName;
         var displayName = ActionDefs[actionIndex].DisplayName;
@@ -198,6 +198,7 @@ public sealed partial class SettingsWindow : Window
         var binding = profile.Bindings.FirstOrDefault(b => b.ActionName == actionName);
         if (binding == null)
         {
+            Log.Information("SaveHotkeyBinding: creating new binding for {Action}", actionName);
             binding = new HotkeyBinding
             {
                 ActionName = actionName,
@@ -211,6 +212,8 @@ public sealed partial class SettingsWindow : Window
         binding.DisplayText = VkToString(virtualKey);
         binding.Modifiers = 0;
 
+        Log.Information("SaveHotkeyBinding: saving {Action} => VK={Key}, ProfileId={ProfileId}, BindingCount={Count}",
+            actionName, virtualKey, profile.Id, profile.Bindings.Count);
         _hotkeyRepo.SaveBindings(profile.Id, profile.Bindings);
         Log.Information("Hotkey saved: {Action} => VK {Key}", actionName, virtualKey);
     }
