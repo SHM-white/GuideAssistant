@@ -25,6 +25,10 @@ public static class Win32Helper
     public const int WS_SYSMENU = 0x00080000;
     public const int WS_MINIMIZEBOX = 0x00020000;
     public const int WS_MAXIMIZEBOX = 0x00010000;
+    public const int WS_DLGFRAME = 0x00400000;
+    public const int WS_CAPTION = 0x00C00000;
+    public const int WS_THICKFRAME = 0x00040000;
+    public const int WS_BORDER = 0x00800000;
 
     public const int LWA_ALPHA = 0x00000002;
 
@@ -165,6 +169,19 @@ public static class Win32Helper
         SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)style);
 
         // Force the window frame to redraw
+        SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    }
+
+    /// <summary>
+    /// Removes the window frame (border, title bar, caption) completely.
+    /// </summary>
+    public static void RemoveWindowFrame(IntPtr hWnd)
+    {
+        var style = GetWindowLong(hWnd, GWL_STYLE);
+        style &= ~(WS_CAPTION | WS_THICKFRAME | WS_BORDER);
+        SetWindowLong(hWnd, GWL_STYLE, style);
+
         SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     }

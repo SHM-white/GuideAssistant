@@ -10,7 +10,7 @@
 
     <Grid>
         <Border x:Name="SubtitleBorder" CornerRadius="12" Padding="20,12"
-                Background="#CC000000" MaxWidth="800"
+                Background="Transparent" MaxWidth="800"
                 HorizontalAlignment="Center" VerticalAlignment="Center">
             <TextBlock x:Name="SubtitleText" Text="等待字幕..." FontSize="22"
                        Foreground="White" TextWrapping="Wrap"

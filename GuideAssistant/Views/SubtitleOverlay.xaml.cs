@@ -34,6 +34,10 @@ public sealed partial class SubtitleOverlay : Window
     {
         _hwnd = WindowNative.GetWindowHandle(this);
 
+        // Remove window frame (border, title bar)
+        ExtendsContentIntoTitleBar = true;
+        Win32Helper.RemoveWindowFrame(_hwnd);
+
         // Set window style for overlay
         var exStyle = Win32Helper.GetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE);
         Win32Helper.SetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE,
@@ -49,7 +53,7 @@ public sealed partial class SubtitleOverlay : Window
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32
         {
             X = (int)(screenWidth / 2 - 400),
-            Y = (int)(screenHeight * 0.65),
+            Y = (int)(screenHeight * 0.9),
             Width = 800,
             Height = 100
         });

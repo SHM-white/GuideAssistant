@@ -23,9 +23,13 @@ public sealed partial class MiniMapOverlay : Window
     {
         _hwnd = WindowNative.GetWindowHandle(this);
 
+        // Remove window frame (border, title bar)
+        ExtendsContentIntoTitleBar = true;
+        Win32Helper.RemoveWindowFrame(_hwnd);
+
         var exStyle = Win32Helper.GetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE);
         Win32Helper.SetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE,
-            exStyle | Win32Helper.WS_EX_TRANSPARENT | Win32Helper.WS_EX_LAYERED | Win32Helper.WS_EX_TOOLWINDOW);
+            exStyle | Win32Helper.WS_EX_TRANSPARENT | Win32Helper.WS_EX_LAYERED | Win32Helper.WS_DLGFRAME);
         Win32Helper.SetWindowOpacity(_hwnd, 0.7);
         Win32Helper.SetAlwaysOnTop(_hwnd, true);
 
@@ -34,8 +38,8 @@ public sealed partial class MiniMapOverlay : Window
 
         AppWindow.MoveAndResize(new Windows.Graphics.RectInt32
         {
-            X = (int)(screenWidth - 210),
-            Y = 10,
+            X = screenWidth / 100,
+            Y = screenWidth / 100,
             Width = 200,
             Height = 200
         });

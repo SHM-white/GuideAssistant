@@ -8,9 +8,13 @@
     mc:Ignorable="d"
     Title="小地图">
 
+    <Window.SystemBackdrop>
+        <DesktopAcrylicBackdrop/>
+    </Window.SystemBackdrop>
+    
     <Grid>
         <Border x:Name="MapBorder" Width="180" Height="180" CornerRadius="90"
-                Background="#AA1A1A2E" HorizontalAlignment="Center" VerticalAlignment="Center"
+                Background="Transparent" HorizontalAlignment="Center" VerticalAlignment="Center"
                 BorderBrush="#44888888" BorderThickness="1">
             <Grid>
                 <!-- Compass cross -->
