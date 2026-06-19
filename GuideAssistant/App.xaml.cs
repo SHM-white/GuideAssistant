@@ -1,5 +1,7 @@
-﻿using GuideAssistant.Data;
+﻿using CommunityToolkit.Mvvm.Messaging;
+using GuideAssistant.Data;
 using GuideAssistant.Services;
+using GuideAssistant.ViewModels;
 using GuideAssistant.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
@@ -44,12 +46,14 @@ namespace GuideAssistant
 
         private static void ConfigureServices(IServiceCollection services)
         {
+            // Data
             services.AddSingleton<Database>();
             services.AddSingleton<BookmarkRepository>();
             services.AddSingleton<GameRepository>();
             services.AddSingleton<HotkeyRepository>();
             services.AddSingleton<WindowStateRepository>();
 
+            // Services
             services.AddSingleton<TabManager>();
             services.AddSingleton<HotkeyService>();
             services.AddSingleton<WindowManager>();
@@ -60,6 +64,20 @@ namespace GuideAssistant
             services.AddSingleton<GameDetector>();
             services.AddSingleton<ProcessLauncher>();
 
+            // ViewModels
+            services.AddSingleton<ViewModels.MainViewModel>();
+            services.AddSingleton<ViewModels.ToolbarViewModel>();
+            services.AddTransient<ViewModels.SettingsViewModel>(sp =>
+            {
+                var mainVm = sp.GetRequiredService<ViewModels.MainViewModel>();
+                return new ViewModels.SettingsViewModel(
+                    sp.GetRequiredService<HotkeyRepository>(),
+                    mainVm.IsSubtitleEnabled,
+                    mainVm.IsMiniMapEnabled,
+                    mainVm.Opacity);
+            });
+
+            // Windows
             services.AddSingleton<MainWindow>();
             services.AddSingleton<ToolbarWindow>();
         }
@@ -77,7 +95,6 @@ namespace GuideAssistant
                 profile.Id = repo.AddProfile(profile);
             }
 
-            // Only seed defaults for actions that have no key assigned
             var defaults = new Dictionary<string, (uint vk, string display, string actionDisplay)>
             {
                 ["play_pause"]        = (0xC0, "`", "播放/暂停"),

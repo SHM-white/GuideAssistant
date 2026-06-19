@@ -9,6 +9,7 @@ public class TabItem
     public bool IsLoading { get; set; }
     public bool CanGoBack { get; set; }
     public bool CanGoForward { get; set; }
+    public bool IsBookmarked { get; set; }
     public Stack<string> BackHistory { get; set; } = new();
     public Stack<string> ForwardHistory { get; set; } = new();
 }

@@ -3,7 +3,7 @@
     x:Class="GuideAssistant.Views.SettingsWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:GuideAssistant.Views"
+    xmlns:local="using:GuideAssistant.ViewModels"
     Title="设置">
 
     <Window.SystemBackdrop>
