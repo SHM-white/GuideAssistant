@@ -187,17 +187,32 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Load hotkey bindings from the database profile.
-    /// EnsureDefaultHotkeys guarantees every known action has a binding in DB.
+    /// Load hotkey bindings by merging DB overrides with built-in defaults.
+    /// Every known action always gets a binding — either from DB or the default.
     /// </summary>
     private void LoadHotkeyBindings()
     {
         var profile = _hotkeyRepository.GetDefaultProfile();
-        var bindings = profile?.Bindings
+        var dbBindings = profile?.Bindings
             ?.Where(b => b.VirtualKey != 0)
-            .ToList() ?? new();
+            .ToDictionary(b => b.ActionName);
 
-        _hotkeyService.SetBindings(bindings);
+        dbBindings ??= new();
+
+        var merged = HotkeyService.KnownActions.Select(a =>
+        {
+            if (dbBindings.TryGetValue(a.ActionName, out var db))
+                return db; // User-customized binding from DB
+            return new HotkeyBinding
+            {
+                ActionName = a.ActionName,
+                ActionDisplay = a.DisplayName,
+                VirtualKey = a.DefaultVk,
+                DisplayText = HotkeyService.VirtualKeyToDisplayName(a.DefaultVk),
+            };
+        }).ToList();
+
+        _hotkeyService.SetBindings(merged);
     }
 
     public void InitializeSubtitleSync()

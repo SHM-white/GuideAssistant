@@ -238,17 +238,17 @@ public class HotkeyService : IDisposable
 
     // ── Known actions & display ──────────────────────────────────
 
-    public static List<(string ActionName, string DisplayName)> KnownActions { get; } = new()
+    public static List<(string ActionName, string DisplayName, int DefaultVk)> KnownActions { get; } = new()
     {
-        ("play_pause",       "播放/暂停"),
-        ("fast_forward",     "快进"),
-        ("fast_backward",    "快退"),
-        ("volume_up",        "音量+"),
-        ("volume_down",      "音量-"),
-        ("toggle_visibility","显示/隐藏"),
-        ("bookmark_page",    "收藏页面"),
-        ("toggle_subtitle",  "字幕切换"),
-        ("toggle_minimap",   "小地图切换"),
+        ("play_pause",       "播放/暂停",   0x50),
+        ("fast_forward",     "快进",        0x36),
+        ("fast_backward",    "快退",        0x35),
+        ("volume_up",        "音量+",       0x39),
+        ("volume_down",      "音量-",       0x38),
+        ("toggle_visibility","显示/隐藏",   0x48),
+        ("bookmark_page",    "收藏页面",    0x42),
+        ("toggle_subtitle",  "字幕切换",    0x53),
+        ("toggle_minimap",   "小地图切换",  0x4D),
     };
 
     public static string VirtualKeyToDisplayName(int vk) => vk switch

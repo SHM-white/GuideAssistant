@@ -59,18 +59,26 @@ public partial class SettingsViewModel : ObservableObject
     {
         HotkeyRows.Clear();
         var profile = _hotkeyRepo.GetDefaultProfile();
-        var bindingLookup = (profile?.Bindings ?? Enumerable.Empty<HotkeyBinding>())
-            .Where(b => b.VirtualKey != 0)
-            .ToLookup(b => b.ActionName);
+        var dbBindings = profile?.Bindings
+            ?.Where(b => b.VirtualKey != 0)
+            .ToDictionary(b => b.ActionName);
+
+        dbBindings ??= new();
 
         foreach (var def in ActionDefs)
         {
-            var binding = bindingLookup[def.ActionName].FirstOrDefault();
+            string displayText;
+            if (dbBindings.TryGetValue(def.ActionName, out var db))
+                displayText = db.DisplayText;
+            else
+                displayText = HotkeyService.VirtualKeyToDisplayName(
+                    HotkeyService.KnownActions.First(a => a.ActionName == def.ActionName).DefaultVk);
+
             HotkeyRows.Add(new HotkeyRow
             {
                 ActionName = def.ActionName,
                 DisplayName = def.DisplayName,
-                CurrentBinding = binding?.DisplayText ?? "未绑定"
+                CurrentBinding = displayText
             });
         }
     }
