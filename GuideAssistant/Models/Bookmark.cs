@@ -4,6 +4,7 @@ public class Bookmark
 {
     public int Id { get; set; }
     public int? GameId { get; set; }
+    public int? FolderId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;
     public string? FaviconUrl { get; set; }

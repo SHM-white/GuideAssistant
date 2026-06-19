@@ -18,7 +18,7 @@
         <Grid.Resources>
             <DataTemplate x:Key="FolderTemplate" x:DataType="models:BookmarkTreeNode">
                 <TreeViewItem AutomationProperties.Name="{x:Bind Label}"
-                              ItemsSource="{x:Bind Children}" IsExpanded="True">
+                              ItemsSource="{x:Bind Children}" IsExpanded="True" CanDrag="False">
                     <StackPanel Orientation="Horizontal">
                         <FontIcon Glyph="{x:Bind IconGlyph}" FontSize="13" Margin="0,0,6,0" />
                         <TextBlock Text="{x:Bind Label}" VerticalAlignment="Center" />
@@ -27,7 +27,7 @@
             </DataTemplate>
 
             <DataTemplate x:Key="BookmarkTemplate" x:DataType="models:BookmarkTreeNode">
-                <TreeViewItem AutomationProperties.Name="{x:Bind Label}">
+                <TreeViewItem AutomationProperties.Name="{x:Bind Label}" CanDrag="False">
                     <StackPanel>
                         <StackPanel Orientation="Horizontal">
                             <FontIcon Glyph="{x:Bind IconGlyph}" FontSize="13" Margin="0,0,6,0" />
@@ -115,6 +115,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <FontIcon Glyph="&#xE8B7;" FontSize="13" Margin="0,0,6,0" />
@@ -125,13 +126,21 @@
                                     PlaceholderText="搜索..."
                                     Width="160" Height="28" FontSize="12"
                                     QuerySubmitted="SearchBox_QuerySubmitted" />
+                    <Button Grid.Column="2" Width="28" Height="28" Padding="0"
+                            Background="Transparent" BorderThickness="0"
+                            ToolTipService.ToolTip="新建文件夹"
+                            Click="NewFolderBtn_Click">
+                        <FontIcon Glyph="&#xE710;" FontSize="12" />
+                    </Button>
                 </Grid>
 
                 <TreeView x:Name="BookmarksTreeView" Grid.Row="1"
-                            Margin="4,0,4,4"
-                            SelectionMode="Single"
-                            ItemTemplateSelector="{StaticResource BookmarkTreeTemplateSelector}"
-                            ItemInvoked="BookmarksTreeView_ItemInvoked" />
+                           Margin="4,0,4,4"
+                           SelectionMode="Single"
+                           CanDragItems="False" CanReorderItems="False"
+                           ItemTemplateSelector="{StaticResource BookmarkTreeTemplateSelector}"
+                           ItemInvoked="BookmarksTreeView_ItemInvoked"
+                           RightTapped="BookmarksTreeView_RightTapped" />
             </Grid>
         </Border>
     </Grid>

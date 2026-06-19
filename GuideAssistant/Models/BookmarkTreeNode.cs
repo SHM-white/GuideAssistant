@@ -10,4 +10,5 @@ public class BookmarkTreeNode
     public ObservableCollection<BookmarkTreeNode> Children { get; set; } = new();
     public Bookmark? Bookmark { get; set; }
     public bool IsFolder { get; set; }
+    public int FolderId { get; set; }
 }

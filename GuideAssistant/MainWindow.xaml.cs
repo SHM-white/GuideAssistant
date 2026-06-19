@@ -11,7 +11,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Serilog;
-using System.Runtime.InteropServices;
 using WinRT.Interop;
 
 namespace GuideAssistant;
@@ -35,10 +34,6 @@ public sealed partial class MainWindow : Window
     private IntPtr _hwnd;
     private System.Timers.Timer? _subtitleTimeSyncTimer;
 
-    // WndProc subclass for WM_HOTKEY (RegisterHotKey → system-level hotkeys)
-    private Win32Helper.WndProcDelegate? _originalWndProc;
-    private Win32Helper.WndProcDelegate? _wndProcHook;
-
     public MainViewModel ViewModel => _viewModel;
 
     public MainWindow(
@@ -60,7 +55,6 @@ public sealed partial class MainWindow : Window
         _hotkeyConfigManager.BindingsChanged += () =>
         {
             _viewModel.ReloadHotkeys();
-            _hotkeyService.RegisterSystemHotkeys(_hwnd);
         };
 
         _hwnd = WindowNative.GetWindowHandle(this);
@@ -72,8 +66,6 @@ public sealed partial class MainWindow : Window
         InitializeWindow();
         InitializeWebView();
         _viewModel.InitializeHotkeys();
-        _hotkeyService.RegisterSystemHotkeys(_hwnd);
-        SubclassWindowForHotkey();
         _viewModel.InitializeSubtitleSync();
         RestoreWindowState();
         _gameDetector.Start();
@@ -88,32 +80,6 @@ public sealed partial class MainWindow : Window
             ConnectToolbarViewModel();
         }
         catch (Exception ex) { Log.Error(ex, "Failed to create ToolbarWindow"); }
-    }
-
-    private void SubclassWindowForHotkey()
-    {
-        _wndProcHook = OnWndProc;
-        var hookPtr = Marshal.GetFunctionPointerForDelegate(_wndProcHook);
-        var originalPtr = Win32Helper.SetWindowLongPtr(_hwnd, Win32Helper.GWLP_WNDPROC, hookPtr);
-        _originalWndProc = Marshal.GetDelegateForFunctionPointer<Win32Helper.WndProcDelegate>(originalPtr);
-    }
-
-    private IntPtr OnWndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
-    {
-        const uint WM_HOTKEY = 0x0312;
-
-        if (msg == WM_HOTKEY)
-        {
-            if (HotkeyService.SuppressAll)
-                return IntPtr.Zero;
-
-            int id = wParam.ToInt32();
-            _hotkeyService.HandleSystemHotkey(id);
-            return IntPtr.Zero;
-        }
-
-        return _originalWndProc?.Invoke(hwnd, msg, wParam, lParam)
-               ?? Win32Helper.DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
     private void InitializeWindow()

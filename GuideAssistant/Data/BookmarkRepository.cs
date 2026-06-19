@@ -40,21 +40,62 @@ public class BookmarkRepository
     {
         using var conn = _db.CreateConnection();
         return conn.ExecuteScalar<int>(@"
-            INSERT INTO bookmarks (game_id, title, url, favicon_url, tags, notes, is_favorite, created_at, updated_at)
-            VALUES (@GameId, @Title, @Url, @FaviconUrl, @Tags, @Notes, @IsFavorite, @CreatedAt, @UpdatedAt);
+            INSERT INTO bookmarks (game_id, folder_id, title, url, favicon_url, tags, notes, is_favorite, created_at, updated_at)
+            VALUES (@GameId, @FolderId, @Title, @Url, @FaviconUrl, @Tags, @Notes, @IsFavorite, @CreatedAt, @UpdatedAt);
             SELECT last_insert_rowid();", b);
     }
 
     public void Update(Bookmark b)
     {
         using var conn = _db.CreateConnection();
-        conn.Execute("UPDATE bookmarks SET title=@Title, tags=@Tags, notes=@Notes, game_id=@GameId, updated_at=@UpdatedAt WHERE id=@Id", b);
+        conn.Execute("UPDATE bookmarks SET title=@Title, tags=@Tags, notes=@Notes, game_id=@GameId, folder_id=@FolderId, updated_at=@UpdatedAt WHERE id=@Id", b);
     }
 
     public void Delete(int id)
     {
         using var conn = _db.CreateConnection();
         conn.Execute("DELETE FROM bookmarks WHERE id=@id", new { id });
+    }
+
+    public void MoveToFolder(int bookmarkId, int? folderId)
+    {
+        using var conn = _db.CreateConnection();
+        conn.Execute("UPDATE bookmarks SET folder_id=@folderId WHERE id=@id", new { id = bookmarkId, folderId });
+    }
+}
+
+public class FolderRepository
+{
+    private readonly Database _db;
+    public FolderRepository(Database db) => _db = db;
+
+    public List<BookmarkFolder> GetAll()
+    {
+        using var conn = _db.CreateConnection();
+        return conn.Query<BookmarkFolder>("SELECT * FROM bookmark_folders ORDER BY sort_order, name").ToList();
+    }
+
+    public int Add(BookmarkFolder f)
+    {
+        using var conn = _db.CreateConnection();
+        return conn.ExecuteScalar<int>(@"
+            INSERT INTO bookmark_folders (name, sort_order, created_at)
+            VALUES (@Name, @SortOrder, @CreatedAt);
+            SELECT last_insert_rowid();", f);
+    }
+
+    public void Update(BookmarkFolder f)
+    {
+        using var conn = _db.CreateConnection();
+        conn.Execute("UPDATE bookmark_folders SET name=@Name, sort_order=@SortOrder WHERE id=@Id", f);
+    }
+
+    public void Delete(int id)
+    {
+        using var conn = _db.CreateConnection();
+        // Unlink bookmarks before deleting folder
+        conn.Execute("UPDATE bookmarks SET folder_id=NULL WHERE folder_id=@id", new { id });
+        conn.Execute("DELETE FROM bookmark_folders WHERE id=@id", new { id });
     }
 }
 

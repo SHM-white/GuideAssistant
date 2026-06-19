@@ -64,6 +64,7 @@ namespace GuideAssistant
             // Data
             services.AddSingleton<Database>();
             services.AddSingleton<BookmarkRepository>();
+            services.AddSingleton<FolderRepository>();
             services.AddSingleton<GameRepository>();
             services.AddSingleton<HotkeyRepository>();
             services.AddSingleton<WindowStateRepository>();
@@ -88,7 +89,6 @@ namespace GuideAssistant
                 var mainVm = sp.GetRequiredService<ViewModels.MainViewModel>();
                 return new ViewModels.SettingsViewModel(
                     sp.GetRequiredService<HotkeyConfigManager>(),
-                    sp.GetRequiredService<HotkeyService>(),
                     mainVm.IsSubtitleEnabled,
                     mainVm.IsMiniMapEnabled,
                     mainVm.Opacity);

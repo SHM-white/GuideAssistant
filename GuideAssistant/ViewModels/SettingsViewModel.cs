@@ -9,7 +9,6 @@ namespace GuideAssistant.ViewModels;
 public partial class SettingsViewModel : ObservableObject
 {
     private readonly HotkeyConfigManager _hotkeyConfigManager;
-    private readonly HotkeyService _hotkeyService;
     private bool _isSubtitleEnabled;
     private bool _isMiniMapEnabled;
     private double _opacity = 0.9;
@@ -37,10 +36,9 @@ public partial class SettingsViewModel : ObservableObject
     public IRelayCommand<HotkeyRow> StartKeyCaptureCommand { get; }
     public IRelayCommand<HotkeyRow> ClearHotkeyCommand { get; }
 
-    public SettingsViewModel(HotkeyConfigManager hotkeyConfigManager, HotkeyService hotkeyService, bool isSubtitleEnabled, bool isMiniMapEnabled, double opacity)
+    public SettingsViewModel(HotkeyConfigManager hotkeyConfigManager, bool isSubtitleEnabled, bool isMiniMapEnabled, double opacity)
     {
         _hotkeyConfigManager = hotkeyConfigManager;
-        _hotkeyService = hotkeyService;
         _isSubtitleEnabled = isSubtitleEnabled;
         _isMiniMapEnabled = isMiniMapEnabled;
         _opacity = opacity;
@@ -97,7 +95,6 @@ public partial class SettingsViewModel : ObservableObject
         KeyCaptureTitle = $"绑定快捷键 — {row.DisplayName}";
         IsCapturingKey = true;
         HotkeyService.SuppressAll = true;
-        _hotkeyService.SuspendSystemHotkeysForCapture();
     }
 
     public void OnKeyCaptured(int virtualKey)
@@ -111,7 +108,6 @@ public partial class SettingsViewModel : ObservableObject
         }
 
         HotkeyService.SuppressAll = false;
-        _hotkeyService.ResumeSystemHotkeysAfterCapture();
         _hotkeyConfigManager.SaveBinding(CapturingRow.ActionName, virtualKey);
         IsCapturingKey = false;
         CapturingRow = null;
@@ -120,7 +116,6 @@ public partial class SettingsViewModel : ObservableObject
     public void CancelKeyCapture()
     {
         HotkeyService.SuppressAll = false;
-        _hotkeyService.ResumeSystemHotkeysAfterCapture();
         IsCapturingKey = false;
         CapturingRow = null;
     }

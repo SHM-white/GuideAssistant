@@ -7,13 +7,15 @@ namespace GuideAssistant.Services;
 public class BookmarkService
 {
     private readonly BookmarkRepository _repo;
+    private readonly FolderRepository _folderRepo;
     private readonly GameRepository _gameRepo;
 
     public event Action? BookmarksChanged;
 
-    public BookmarkService(BookmarkRepository repo, GameRepository gameRepo)
+    public BookmarkService(BookmarkRepository repo, FolderRepository folderRepo, GameRepository gameRepo)
     {
         _repo = repo;
+        _folderRepo = folderRepo;
         _gameRepo = gameRepo;
     }
 
@@ -59,5 +61,36 @@ public class BookmarkService
         Log.Information("Bookmark added: {Title}", title);
         BookmarksChanged?.Invoke();
         return id;
+    }
+
+    // ── Folder Management ──────────────────────────────
+
+    public List<BookmarkFolder> GetAllFolders() => _folderRepo.GetAll();
+
+    public int AddFolder(string name)
+    {
+        var folder = new BookmarkFolder { Name = name, CreatedAt = DateTime.Now };
+        var id = _folderRepo.Add(folder);
+        BookmarksChanged?.Invoke();
+        return id;
+    }
+
+    public void RenameFolder(int id, string name)
+    {
+        var folder = new BookmarkFolder { Id = id, Name = name };
+        _folderRepo.Update(folder);
+        BookmarksChanged?.Invoke();
+    }
+
+    public void DeleteFolder(int id)
+    {
+        _folderRepo.Delete(id);
+        BookmarksChanged?.Invoke();
+    }
+
+    public void MoveBookmarkToFolder(int bookmarkId, int? folderId)
+    {
+        _repo.MoveToFolder(bookmarkId, folderId);
+        BookmarksChanged?.Invoke();
     }
 }

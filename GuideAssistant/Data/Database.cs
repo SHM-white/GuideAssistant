@@ -96,6 +96,13 @@ public class Database
                 value TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS bookmark_folders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
             INSERT OR IGNORE INTO window_states (window_name, x, y, width, height, opacity, is_always_on_top)
             VALUES ('MainWindow', 100, 100, 960, 640, 0.9, 1);
 
@@ -116,27 +123,52 @@ public class Database
         checkCmd.CommandText = "SELECT value FROM settings WHERE key = 'db_version'";
         var currentVersion = checkCmd.ExecuteScalar() as string;
 
-        if (currentVersion != "2")
+        if (currentVersion != "3")
         {
             using var rebuildCmd = conn.CreateCommand();
-            rebuildCmd.CommandText = @"
-                DROP TABLE IF EXISTS bookmarks;
-                CREATE TABLE bookmarks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
-                    title TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    favicon_url TEXT,
-                    tags TEXT,
-                    notes TEXT,
-                    is_favorite INTEGER DEFAULT 0,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                );
-                INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '2');
-            ";
+            if (currentVersion == "2")
+            {
+                // Migrate from v2 to v3: add folder support
+                rebuildCmd.CommandText = @"
+                    CREATE TABLE IF NOT EXISTS bookmark_folders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        sort_order INTEGER DEFAULT 0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
+                    ALTER TABLE bookmarks ADD COLUMN folder_id INTEGER REFERENCES bookmark_folders(id);
+                    INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '3');
+                ";
+            }
+            else
+            {
+                // Fresh install: rebuild bookmarks + add folders
+                rebuildCmd.CommandText = @"
+                    DROP TABLE IF EXISTS bookmarks;
+                    CREATE TABLE bookmarks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
+                        folder_id INTEGER REFERENCES bookmark_folders(id),
+                        title TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        favicon_url TEXT,
+                        tags TEXT,
+                        notes TEXT,
+                        is_favorite INTEGER DEFAULT 0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS bookmark_folders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        sort_order INTEGER DEFAULT 0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
+                    INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '3');
+                ";
+            }
             rebuildCmd.ExecuteNonQuery();
-            Log.Information("Bookmarks table rebuilt (db_version migrated to 2)");
+            Log.Information("Database migrated to db_version 3 (folder support)");
         }
     }
 }
