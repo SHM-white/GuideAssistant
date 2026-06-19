@@ -6,9 +6,9 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Height="40">
+    Height="50">
 
-    <Grid Padding="8,4,150,4" Background="{ThemeResource SystemChromeMediumLowColor}">
+    <Grid Padding="8,8,150,8" Background="{ThemeResource SystemChromeMediumLowColor}">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="Auto" />
@@ -18,22 +18,22 @@
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <Button x:Name="BackBtn" Grid.Column="0" Background="Transparent" BorderThickness="0" Click="BackBtn_Click">
+        <Button x:Name="BackBtn" Grid.Column="0" Background="Transparent" BorderThickness="0" Click="BackBtn_Click" Margin="4,0">
             <SymbolIcon Symbol="Back" />
         </Button>
-        <Button x:Name="ForwardBtn" Grid.Column="1" Background="Transparent" BorderThickness="0" Click="ForwardBtn_Click">
+        <Button x:Name="ForwardBtn" Grid.Column="1" Background="Transparent" BorderThickness="0" Click="ForwardBtn_Click" Margin="4,0">
             <SymbolIcon Symbol="Forward" />
         </Button>
-        <Button x:Name="RefreshBtn" Grid.Column="2" Background="Transparent" BorderThickness="0" Click="RefreshBtn_Click">
+        <Button x:Name="RefreshBtn" Grid.Column="2" Background="Transparent" BorderThickness="0" Click="RefreshBtn_Click" Margin="4,0">
             <SymbolIcon Symbol="Refresh" />
         </Button>
         <AutoSuggestBox x:Name="UrlBox" Grid.Column="3" Height="30" VerticalAlignment="Center"
                          PlaceholderText="输入网址或搜索..." FontSize="13"
-                         QueryIcon="Find" QuerySubmitted="UrlBox_QuerySubmitted" KeyDown="UrlBox_KeyDown" />
-        <Button x:Name="BookmarkBtn" Grid.Column="4" Background="Transparent" BorderThickness="0" Click="BookmarkBtn_Click">
+                         QueryIcon="Find" QuerySubmitted="UrlBox_QuerySubmitted" KeyDown="UrlBox_KeyDown" Margin="4,0" />
+        <Button x:Name="BookmarkBtn" Grid.Column="4" Background="Transparent" BorderThickness="0" Click="BookmarkBtn_Click" Margin="4,0">
             <SymbolIcon x:Name="BookmarkIcon" Symbol="OutlineStar" />
         </Button>
-        <Button x:Name="SettingsBtn" Grid.Column="5" Background="Transparent" BorderThickness="0" Click="SettingsBtn_Click">
+        <Button x:Name="SettingsBtn" Grid.Column="5" Background="Transparent" BorderThickness="0" Click="SettingsBtn_Click" Margin="4,0">
             <SymbolIcon Symbol="Setting" />
         </Button>
     </Grid>

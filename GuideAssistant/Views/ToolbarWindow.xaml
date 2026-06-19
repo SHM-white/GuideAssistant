@@ -100,7 +100,7 @@
         </Button>
 
         <!-- Right: Navigation + Favorites -->
-        <controls:NavigationBar x:Name="NavBarControl" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" />
+        <controls:NavigationBar x:Name="NavBarControl" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Padding="10"/>
 
         <Border Grid.Row="1" Grid.RowSpan="2" Grid.Column="1" Margin="8,4,8,8"
                 Background="{ThemeResource SystemChromeMediumLowColor}"

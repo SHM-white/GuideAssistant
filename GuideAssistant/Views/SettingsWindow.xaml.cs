@@ -41,6 +41,10 @@ public sealed partial class SettingsWindow : Window
         var titleBar = AppWindow.TitleBar;
         titleBar.ExtendsContentIntoTitleBar = true;
         titleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
+        titleBar.ButtonBackgroundColor = Colors.Transparent;
+        titleBar.ButtonForegroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
+        titleBar.ButtonInactiveForegroundColor = Colors.Transparent;
 
         AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 560, Height = 480 });
         var presenter = AppWindow.Presenter as OverlappedPresenter;
