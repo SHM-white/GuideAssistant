@@ -98,9 +98,6 @@ public sealed partial class SettingsWindow : Window
             _viewModel.OnKeyCaptured(_pendingKey.Value);
         else
             _viewModel.CancelKeyCapture();
-
-        HotkeyList.ItemsSource = null;
-        HotkeyList.ItemsSource = _viewModel.HotkeyRows;
     }
 
     private void OnKeyCaptureDialogOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
@@ -123,8 +120,6 @@ public sealed partial class SettingsWindow : Window
         if (sender is Button btn && btn.DataContext is HotkeyRow row)
         {
             _viewModel.ClearHotkeyCommand.Execute(row);
-            HotkeyList.ItemsSource = null;
-            HotkeyList.ItemsSource = _viewModel.HotkeyRows;
         }
     }
 

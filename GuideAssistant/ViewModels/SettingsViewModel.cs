@@ -1,8 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GuideAssistant.Data;
-using GuideAssistant.Models;
 using GuideAssistant.Services;
 using Serilog;
 
@@ -10,7 +8,7 @@ namespace GuideAssistant.ViewModels;
 
 public partial class SettingsViewModel : ObservableObject
 {
-    private readonly HotkeyRepository _hotkeyRepo;
+    private readonly HotkeyConfigManager _hotkeyConfigManager;
     private readonly HotkeyService _hotkeyService;
     private bool _isSubtitleEnabled;
     private bool _isMiniMapEnabled;
@@ -39,11 +37,9 @@ public partial class SettingsViewModel : ObservableObject
     public IRelayCommand<HotkeyRow> StartKeyCaptureCommand { get; }
     public IRelayCommand<HotkeyRow> ClearHotkeyCommand { get; }
 
-    public event Action? HotkeysReloaded;
-
-    public SettingsViewModel(HotkeyRepository hotkeyRepo, HotkeyService hotkeyService, bool isSubtitleEnabled, bool isMiniMapEnabled, double opacity)
+    public SettingsViewModel(HotkeyConfigManager hotkeyConfigManager, HotkeyService hotkeyService, bool isSubtitleEnabled, bool isMiniMapEnabled, double opacity)
     {
-        _hotkeyRepo = hotkeyRepo;
+        _hotkeyConfigManager = hotkeyConfigManager;
         _hotkeyService = hotkeyService;
         _isSubtitleEnabled = isSubtitleEnabled;
         _isMiniMapEnabled = isMiniMapEnabled;
@@ -53,34 +49,45 @@ public partial class SettingsViewModel : ObservableObject
         SelectPageCommand = new RelayCommand<string>(p => SelectedPage = p);
         StartKeyCaptureCommand = new RelayCommand<HotkeyRow>(StartKeyCapture);
         ClearHotkeyCommand = new RelayCommand<HotkeyRow>(ClearHotkey);
+
+        // Keep UI in sync with config manager changes
+        _hotkeyConfigManager.BindingsChanged += LoadHotkeys;
     }
 
     public void LoadHotkeys()
     {
-        HotkeyRows.Clear();
-        var profile = _hotkeyRepo.GetDefaultProfile();
-        var dbBindings = profile?.Bindings
-            ?.Where(b => b.VirtualKey != 0)
-            .ToDictionary(b => b.ActionName);
+        var merged = _hotkeyConfigManager.GetMergedBindings();
+        var lookup = merged.ToDictionary(b => b.ActionName);
 
-        dbBindings ??= new();
-
-        foreach (var def in ActionDefs)
+        for (int i = 0; i < ActionDefs.Length; i++)
         {
-            string displayText;
-            if (dbBindings.TryGetValue(def.ActionName, out var db))
-                displayText = db.DisplayText;
-            else
-                displayText = HotkeyService.VirtualKeyToDisplayName(
+            var def = ActionDefs[i];
+            var displayText = lookup.TryGetValue(def.ActionName, out var b)
+                ? b.DisplayText
+                : HotkeyService.VirtualKeyToDisplayName(
                     HotkeyService.KnownActions.First(a => a.ActionName == def.ActionName).DefaultVk);
 
-            HotkeyRows.Add(new HotkeyRow
+            if (i < HotkeyRows.Count)
+                {
+                    // In-place update: only change CurrentBinding property
+                    var row = HotkeyRows[i];
+                    if (row.ActionName == def.ActionName)
+                        row.CurrentBinding = displayText;
+                }
+            else
             {
-                ActionName = def.ActionName,
-                DisplayName = def.DisplayName,
-                CurrentBinding = displayText
-            });
+                HotkeyRows.Add(new HotkeyRow
+                {
+                    ActionName = def.ActionName,
+                    DisplayName = def.DisplayName,
+                    CurrentBinding = displayText
+                });
+            }
         }
+
+        // Remove excess rows (shouldn't happen unless KnownActions shrinks)
+        while (HotkeyRows.Count > ActionDefs.Length)
+            HotkeyRows.RemoveAt(HotkeyRows.Count - 1);
     }
 
     public void StartKeyCapture(HotkeyRow? row)
@@ -96,13 +103,18 @@ public partial class SettingsViewModel : ObservableObject
     public void OnKeyCaptured(int virtualKey)
     {
         if (CapturingRow == null) return;
+        if (string.IsNullOrEmpty(CapturingRow.ActionName))
+        {
+            Log.Warning("OnKeyCaptured: CapturingRow.ActionName is null/empty, discarding");
+            CancelKeyCapture();
+            return;
+        }
+
         HotkeyService.SuppressAll = false;
         _hotkeyService.ResumeSystemHotkeysAfterCapture();
-        SaveHotkeyBinding(CapturingRow.ActionName, virtualKey);
+        _hotkeyConfigManager.SaveBinding(CapturingRow.ActionName, virtualKey);
         IsCapturingKey = false;
         CapturingRow = null;
-        HotkeysReloaded?.Invoke();
-        LoadHotkeys();
     }
 
     public void CancelKeyCapture()
@@ -116,25 +128,7 @@ public partial class SettingsViewModel : ObservableObject
     private void ClearHotkey(HotkeyRow? row)
     {
         if (row == null) return;
-        var profile = _hotkeyRepo.GetDefaultProfile();
-        if (profile == null) return;
-
-        _hotkeyRepo.ClearBinding(profile.Id, row.ActionName);
-        HotkeysReloaded?.Invoke();
-        LoadHotkeys();
-        Log.Information("Hotkey cleared: {Action}", row.ActionName);
-    }
-
-    private void SaveHotkeyBinding(string actionName, int virtualKey)
-    {
-        var profile = _hotkeyRepo.GetDefaultProfile();
-        if (profile == null) return;
-
-        var def = ActionDefs.First(a => a.ActionName == actionName);
-        _hotkeyRepo.SaveBinding(profile.Id, actionName, def.DisplayName, virtualKey,
-            HotkeyService.VirtualKeyToDisplayName(virtualKey));
-
-        Log.Information("Hotkey saved: {Action} => VK {Key}", actionName, virtualKey);
+        _hotkeyConfigManager.ClearBinding(row.ActionName);
     }
 }
 

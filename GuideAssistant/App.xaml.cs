@@ -1,4 +1,5 @@
 ﻿using CommunityToolkit.Mvvm.Messaging;
+using Dapper;
 using GuideAssistant.Data;
 using GuideAssistant.Services;
 using GuideAssistant.ViewModels;
@@ -29,6 +30,11 @@ namespace GuideAssistant
                     retainedFileCountLimit: 7)
                 .CreateLogger();
 
+            // Enable Dapper underscore → PascalCase column mapping
+            // (Microsoft.Data.Sqlite GetOrdinal is case-sensitive in some versions,
+            //  so action_name won't map to ActionName without this)
+            DefaultTypeMap.MatchNamesWithUnderscores = true;
+
             Log.Information("Application starting");
 
             var services = new ServiceCollection();
@@ -48,9 +54,9 @@ namespace GuideAssistant
             var db = Services.GetRequiredService<Database>();
             db.Initialize();
 
-            // Ensure default hotkey profile exists
-            var hotkeyRepo = Services.GetRequiredService<HotkeyRepository>();
-            EnsureDefaultHotkeys(hotkeyRepo);
+            // Ensure default hotkey profile exists (seeded from KnownActions)
+            var hotkeyConfig = Services.GetRequiredService<HotkeyConfigManager>();
+            hotkeyConfig.EnsureDefaultProfile();
         }
 
         private static void ConfigureServices(IServiceCollection services)
@@ -65,6 +71,7 @@ namespace GuideAssistant
             // Services
             services.AddSingleton<TabManager>();
             services.AddSingleton<HotkeyService>();
+            services.AddSingleton<HotkeyConfigManager>();
             services.AddSingleton<WindowManager>();
             services.AddSingleton<BookmarkService>();
             services.AddSingleton<BilibiliApi>();
@@ -80,7 +87,7 @@ namespace GuideAssistant
             {
                 var mainVm = sp.GetRequiredService<ViewModels.MainViewModel>();
                 return new ViewModels.SettingsViewModel(
-                    sp.GetRequiredService<HotkeyRepository>(),
+                    sp.GetRequiredService<HotkeyConfigManager>(),
                     sp.GetRequiredService<HotkeyService>(),
                     mainVm.IsSubtitleEnabled,
                     mainVm.IsMiniMapEnabled,
@@ -90,65 +97,6 @@ namespace GuideAssistant
             // Windows
             services.AddSingleton<MainWindow>();
             services.AddSingleton<ToolbarWindow>();
-        }
-
-        private static void EnsureDefaultHotkeys(HotkeyRepository repo)
-        {
-            var profile = repo.GetDefaultProfile();
-            if (profile == null)
-            {
-                profile = new Models.HotkeyProfile
-                {
-                    Name = "默认方案",
-                    IsDefault = true
-                };
-                profile.Id = repo.AddProfile(profile);
-            }
-
-            // Remove stale bindings that have empty ActionName (dirty data)
-            var staleCount = profile.Bindings.RemoveAll(b => string.IsNullOrEmpty(b.ActionName));
-            if (staleCount > 0)
-                Log.Warning("EnsureDefaultHotkeys: removed {Count} stale bindings with empty ActionName", staleCount);
-
-            var defaults = new Dictionary<string, (int vk, string display, string actionDisplay)>
-            {
-                ["play_pause"]        = (0x50, "P", "播放/暂停"),
-                ["fast_forward"]      = (0x36, "6", "快进"),
-                ["fast_backward"]     = (0x35, "5", "快退"),
-                ["volume_up"]         = (0x39, "9", "音量+"),
-                ["volume_down"]       = (0x38, "8", "音量-"),
-                ["toggle_visibility"] = (0x48, "H", "显示/隐藏"),
-                ["bookmark_page"]     = (0x42, "B", "收藏页面"),
-                ["toggle_subtitle"]   = (0x53, "S", "字幕切换"),
-                ["toggle_minimap"]    = (0x4D, "M", "小地图切换"),
-            };
-
-            bool needsSave = false;
-            foreach (var kv in defaults)
-            {
-                var binding = profile.Bindings.FirstOrDefault(b => b.ActionName == kv.Key);
-                if (binding == null)
-                {
-                    profile.Bindings.Add(new Models.HotkeyBinding
-                    {
-                        ActionName = kv.Key,
-                        ActionDisplay = kv.Value.actionDisplay,
-                        VirtualKey = kv.Value.vk,
-                        DisplayText = kv.Value.display,
-                    });
-                    needsSave = true;
-                }
-                else if (binding.VirtualKey == 0)
-                {
-                    binding.VirtualKey = kv.Value.vk;
-                    binding.DisplayText = kv.Value.display;
-                    binding.ActionDisplay = kv.Value.actionDisplay;
-                    needsSave = true;
-                }
-            }
-
-            if (needsSave)
-                repo.SaveBindings(profile.Id, profile.Bindings);
         }
 
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)

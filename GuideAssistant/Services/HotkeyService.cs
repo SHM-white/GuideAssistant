@@ -240,7 +240,7 @@ public class HotkeyService : IDisposable
 
     public static List<(string ActionName, string DisplayName, int DefaultVk)> KnownActions { get; } = new()
     {
-        ("play_pause",       "播放/暂停",   0x50),
+        ("play_pause",       "播放/暂停",   0xC0),
         ("fast_forward",     "快进",        0x36),
         ("fast_backward",    "快退",        0x35),
         ("volume_up",        "音量+",       0x39),

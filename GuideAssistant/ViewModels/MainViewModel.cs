@@ -17,7 +17,7 @@ public partial class MainViewModel : ObservableObject
     private readonly BookmarkService _bookmarkService;
     private readonly SubtitleService _subtitleService;
     private readonly DirectionService _directionService;
-    private readonly HotkeyRepository _hotkeyRepository;
+    private readonly HotkeyConfigManager _hotkeyConfigManager;
     private readonly WindowStateRepository _windowStateRepo;
 
     private double _opacity = 0.9;
@@ -67,7 +67,7 @@ public partial class MainViewModel : ObservableObject
         TabManager tabManager, HotkeyService hotkeyService, WindowManager windowManager,
         GameDetector gameDetector, BookmarkService bookmarkService,
         SubtitleService subtitleService, DirectionService directionService,
-        HotkeyRepository hotkeyRepository, WindowStateRepository windowStateRepo)
+        HotkeyConfigManager hotkeyConfigManager, WindowStateRepository windowStateRepo)
     {
         _tabManager = tabManager;
         _hotkeyService = hotkeyService;
@@ -76,7 +76,7 @@ public partial class MainViewModel : ObservableObject
         _bookmarkService = bookmarkService;
         _subtitleService = subtitleService;
         _directionService = directionService;
-        _hotkeyRepository = hotkeyRepository;
+        _hotkeyConfigManager = hotkeyConfigManager;
         _windowStateRepo = windowStateRepo;
 
         if (_tabManager.ActiveTab != null)
@@ -192,26 +192,7 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     private void LoadHotkeyBindings()
     {
-        var profile = _hotkeyRepository.GetDefaultProfile();
-        var dbBindings = profile?.Bindings
-            ?.Where(b => b.VirtualKey != 0)
-            .ToDictionary(b => b.ActionName);
-
-        dbBindings ??= new();
-
-        var merged = HotkeyService.KnownActions.Select(a =>
-        {
-            if (dbBindings.TryGetValue(a.ActionName, out var db))
-                return db; // User-customized binding from DB
-            return new HotkeyBinding
-            {
-                ActionName = a.ActionName,
-                ActionDisplay = a.DisplayName,
-                VirtualKey = a.DefaultVk,
-                DisplayText = HotkeyService.VirtualKeyToDisplayName(a.DefaultVk),
-            };
-        }).ToList();
-
+        var merged = _hotkeyConfigManager.GetMergedBindings();
         _hotkeyService.SetBindings(merged);
     }
 

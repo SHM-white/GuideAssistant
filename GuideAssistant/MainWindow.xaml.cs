@@ -23,6 +23,7 @@ public sealed partial class MainWindow : Window
     private readonly DirectionService _directionService;
     private readonly GameDetector _gameDetector;
     private readonly HotkeyService _hotkeyService;
+    private readonly HotkeyConfigManager _hotkeyConfigManager;
 
     private ToolbarWindow? _toolbarWindow;
     private SubtitleOverlay? _subtitleOverlay;
@@ -39,7 +40,7 @@ public sealed partial class MainWindow : Window
     public MainWindow(
         MainViewModel viewModel, TabManager tabManager, WindowManager windowManager,
         SubtitleService subtitleService, DirectionService directionService,
-        GameDetector gameDetector, HotkeyService hotkeyService)
+        GameDetector gameDetector, HotkeyService hotkeyService, HotkeyConfigManager hotkeyConfigManager)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -49,6 +50,14 @@ public sealed partial class MainWindow : Window
         _directionService = directionService;
         _gameDetector = gameDetector;
         _hotkeyService = hotkeyService;
+        _hotkeyConfigManager = hotkeyConfigManager;
+
+        // React to hotkey binding changes (from Settings or elsewhere)
+        _hotkeyConfigManager.BindingsChanged += () =>
+        {
+            _viewModel.ReloadHotkeys();
+            _hotkeyService.RegisterSystemHotkeys(_hwnd);
+        };
 
         _hwnd = WindowNative.GetWindowHandle(this);
         _windowManager.MainWindowHandle = _hwnd;
@@ -194,12 +203,6 @@ public sealed partial class MainWindow : Window
         WeakReferenceMessenger.Default.Register<SubtitleSyncMessage>(this, (r, m) =>
         { if (m.Start) StartSubtitleTimeSync(); else StopSubtitleTimeSync(); });
 
-        WeakReferenceMessenger.Default.Register<HotkeysReloadMessage>(this, (r, m) =>
-        {
-            _viewModel.ReloadHotkeys();
-            _hotkeyService.RegisterSystemHotkeys(_hwnd);
-        });
-
         WeakReferenceMessenger.Default.Register<OpenSettingsMessage>(this, (r, m) =>
             OpenSettingsWindow());
     }
@@ -233,7 +236,6 @@ public sealed partial class MainWindow : Window
     private void OpenSettingsWindow()
     {
         var settingsVm = App.Services.GetRequiredService<SettingsViewModel>();
-        settingsVm.HotkeysReloaded += () => WeakReferenceMessenger.Default.Send(new HotkeysReloadMessage());
         settingsVm.PropertyChanged += (s, e) =>
         {
             if (e.PropertyName == nameof(SettingsViewModel.IsSubtitleEnabled))
