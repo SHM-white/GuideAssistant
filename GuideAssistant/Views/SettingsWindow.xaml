@@ -78,23 +78,17 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Keyboard capture overlay -->
-        <Grid x:Name="KeyCaptureOverlay" Visibility="Collapsed"
-              Background="#80000000" KeyDown="KeyCaptureOverlay_KeyDown"
-              IsTabStop="True"
-              HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-            <Border Background="{ThemeResource CardBackgroundFillColorDefault}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefault}"
-                    BorderThickness="1" CornerRadius="8"
-                    Padding="32" HorizontalAlignment="Center" VerticalAlignment="Center"
-                    MinWidth="300">
-                <StackPanel Spacing="8" HorizontalAlignment="Center">
-                    <TextBlock x:Name="KeyCaptureTitle" FontSize="16" FontWeight="SemiBold" TextAlignment="Center" />
-                    <TextBlock Text="请按下想要绑定的按键…" FontSize="14" TextAlignment="Center" Opacity="0.8" />
-                    <TextBlock Text="按 Esc 取消" FontSize="12" TextAlignment="Center" Opacity="0.5" />
-                </StackPanel>
-            </Border>
-        </Grid>
+        <!-- Key capture dialog -->
+        <ContentDialog x:Name="KeyCaptureDialog"
+                       x:FieldModifier="private"
+                       CloseButtonText="取消"
+                       Style="{StaticResource DefaultContentDialogStyle}">
+            <StackPanel x:Name="KeyCaptureContent" Spacing="8" HorizontalAlignment="Center" Padding="0,8"
+                        IsTabStop="True" KeyDown="OnKeyCaptureKeyDown">
+                <TextBlock Text="请按下想要绑定的按键…" FontSize="14" TextAlignment="Center" />
+                <TextBlock Text="按 Esc 或点击取消放弃修改" FontSize="12" TextAlignment="Center" Opacity="0.5" />
+            </StackPanel>
+        </ContentDialog>
         </Grid>
         </NavigationView.Content>
     </NavigationView>

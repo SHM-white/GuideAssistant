@@ -15,7 +15,7 @@ public class HotkeyRepository
         var profiles = conn.Query<HotkeyProfile>("SELECT * FROM hotkey_profiles ORDER BY is_default DESC, name").ToList();
         foreach (var p in profiles)
         {
-            p.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id", new { id = p.Id }).ToList();
+            p.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = p.Id }).ToList();
         }
         return profiles;
     }
@@ -25,7 +25,7 @@ public class HotkeyRepository
         using var conn = _db.CreateConnection();
         var profile = conn.QueryFirstOrDefault<HotkeyProfile>("SELECT * FROM hotkey_profiles WHERE is_default=1");
         if (profile != null)
-            profile.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id", new { id = profile.Id }).ToList();
+            profile.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = profile.Id }).ToList();
         return profile;
     }
 
@@ -57,6 +57,27 @@ public class HotkeyRepository
         tx.Commit();
         Log.Information("SaveBindings: profile={ProfileId}, total={Total}, saved={Saved}, skipped={Skipped}",
             profileId, bindings.Count, saved, skipped);
+    }
+
+    public void SaveBinding(int profileId, string actionName, string actionDisplay, int virtualKey, string displayText)
+    {
+        using var conn = _db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        conn.Execute("DELETE FROM hotkey_bindings WHERE profile_id=@pid AND action_name=@name",
+            new { pid = profileId, name = actionName }, tx);
+        conn.Execute(@"INSERT INTO hotkey_bindings (profile_id, action_name, action_display, modifiers, virtual_key, display_text)
+            VALUES (@pid, @name, @display, 0, @vk, @text)",
+            new { pid = profileId, name = actionName, display = actionDisplay, vk = virtualKey, text = displayText }, tx);
+        tx.Commit();
+        Log.Information("SaveBinding: profile={ProfileId}, action={Action}, vk={VK}", profileId, actionName, virtualKey);
+    }
+
+    public void ClearBinding(int profileId, string actionName)
+    {
+        using var conn = _db.CreateConnection();
+        conn.Execute("DELETE FROM hotkey_bindings WHERE profile_id=@pid AND action_name=@name",
+            new { pid = profileId, name = actionName });
+        Log.Information("ClearBinding: profile={ProfileId}, action={Action}", profileId, actionName);
     }
 
     public void DeleteProfile(int id)

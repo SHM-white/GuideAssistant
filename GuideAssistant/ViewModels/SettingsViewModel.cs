@@ -11,6 +11,7 @@ namespace GuideAssistant.ViewModels;
 public partial class SettingsViewModel : ObservableObject
 {
     private readonly HotkeyRepository _hotkeyRepo;
+    private readonly HotkeyService _hotkeyService;
     private bool _isSubtitleEnabled;
     private bool _isMiniMapEnabled;
     private double _opacity = 0.9;
@@ -40,9 +41,10 @@ public partial class SettingsViewModel : ObservableObject
 
     public event Action? HotkeysReloaded;
 
-    public SettingsViewModel(HotkeyRepository hotkeyRepo, bool isSubtitleEnabled, bool isMiniMapEnabled, double opacity)
+    public SettingsViewModel(HotkeyRepository hotkeyRepo, HotkeyService hotkeyService, bool isSubtitleEnabled, bool isMiniMapEnabled, double opacity)
     {
         _hotkeyRepo = hotkeyRepo;
+        _hotkeyService = hotkeyService;
         _isSubtitleEnabled = isSubtitleEnabled;
         _isMiniMapEnabled = isMiniMapEnabled;
         _opacity = opacity;
@@ -57,14 +59,18 @@ public partial class SettingsViewModel : ObservableObject
     {
         HotkeyRows.Clear();
         var profile = _hotkeyRepo.GetDefaultProfile();
+        var bindingLookup = (profile?.Bindings ?? Enumerable.Empty<HotkeyBinding>())
+            .Where(b => b.VirtualKey != 0)
+            .ToLookup(b => b.ActionName);
+
         foreach (var def in ActionDefs)
         {
-            var binding = profile?.Bindings.FirstOrDefault(b => b.ActionName == def.ActionName);
+            var binding = bindingLookup[def.ActionName].FirstOrDefault();
             HotkeyRows.Add(new HotkeyRow
             {
                 ActionName = def.ActionName,
                 DisplayName = def.DisplayName,
-                CurrentBinding = (binding != null && binding.VirtualKey != 0) ? binding.DisplayText : "未绑定"
+                CurrentBinding = binding?.DisplayText ?? "未绑定"
             });
         }
     }
@@ -75,11 +81,15 @@ public partial class SettingsViewModel : ObservableObject
         CapturingRow = row;
         KeyCaptureTitle = $"绑定快捷键 — {row.DisplayName}";
         IsCapturingKey = true;
+        HotkeyService.SuppressAll = true;
+        _hotkeyService.SuspendSystemHotkeysForCapture();
     }
 
-    public void OnKeyCaptured(uint virtualKey)
+    public void OnKeyCaptured(int virtualKey)
     {
         if (CapturingRow == null) return;
+        HotkeyService.SuppressAll = false;
+        _hotkeyService.ResumeSystemHotkeysAfterCapture();
         SaveHotkeyBinding(CapturingRow.ActionName, virtualKey);
         IsCapturingKey = false;
         CapturingRow = null;
@@ -89,6 +99,8 @@ public partial class SettingsViewModel : ObservableObject
 
     public void CancelKeyCapture()
     {
+        HotkeyService.SuppressAll = false;
+        _hotkeyService.ResumeSystemHotkeysAfterCapture();
         IsCapturingKey = false;
         CapturingRow = null;
     }
@@ -98,38 +110,22 @@ public partial class SettingsViewModel : ObservableObject
         if (row == null) return;
         var profile = _hotkeyRepo.GetDefaultProfile();
         if (profile == null) return;
-        var binding = profile.Bindings.FirstOrDefault(b => b.ActionName == row.ActionName);
-        if (binding != null)
-        {
-            binding.Modifiers = 0;
-            binding.VirtualKey = 0;
-            binding.DisplayText = "";
-            _hotkeyRepo.SaveBindings(profile.Id, profile.Bindings);
-            HotkeysReloaded?.Invoke();
-            LoadHotkeys();
-            Log.Information("Hotkey cleared: {Action}", row.ActionName);
-        }
+
+        _hotkeyRepo.ClearBinding(profile.Id, row.ActionName);
+        HotkeysReloaded?.Invoke();
+        LoadHotkeys();
+        Log.Information("Hotkey cleared: {Action}", row.ActionName);
     }
 
-    private void SaveHotkeyBinding(string actionName, uint virtualKey)
+    private void SaveHotkeyBinding(string actionName, int virtualKey)
     {
         var profile = _hotkeyRepo.GetDefaultProfile();
         if (profile == null) return;
-        var binding = profile.Bindings.FirstOrDefault(b => b.ActionName == actionName);
-        if (binding == null)
-        {
-            binding = new HotkeyBinding
-            {
-                ActionName = actionName,
-                ActionDisplay = ActionDefs.First(a => a.ActionName == actionName).DisplayName,
-                ProfileId = profile.Id
-            };
-            profile.Bindings.Add(binding);
-        }
-        binding.VirtualKey = virtualKey;
-        binding.DisplayText = HotkeyService.VirtualKeyToDisplayName(virtualKey);
-        binding.Modifiers = 0;
-        _hotkeyRepo.SaveBindings(profile.Id, profile.Bindings);
+
+        var def = ActionDefs.First(a => a.ActionName == actionName);
+        _hotkeyRepo.SaveBinding(profile.Id, actionName, def.DisplayName, virtualKey,
+            HotkeyService.VirtualKeyToDisplayName(virtualKey));
+
         Log.Information("Hotkey saved: {Action} => VK {Key}", actionName, virtualKey);
     }
 }

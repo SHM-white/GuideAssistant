@@ -20,6 +20,7 @@ public static class Win32Helper
     public const int WS_EX_NOACTIVATE = 0x08000000;
     public const int GWL_EXSTYLE = -20;
     public const int GWL_STYLE = -16;
+    public const int GWLP_WNDPROC = -4;
 
     public const int WS_SYSMENU = 0x00080000;
     public const int WS_MINIMIZEBOX = 0x00020000;
@@ -52,10 +53,15 @@ public static class Win32Helper
     public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
-    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    public static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
-    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+    public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    public delegate IntPtr WndProcDelegate(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll")]
     public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
@@ -104,9 +110,9 @@ public static class Win32Helper
     /// </summary>
     public static void HideSystemCaptionButtons(IntPtr hWnd)
     {
-        var style = GetWindowLongPtr64(hWnd, GWL_STYLE).ToInt32();
+        var style = GetWindowLongPtr(hWnd, GWL_STYLE).ToInt32();
         style &= ~WS_SYSMENU;
-        SetWindowLongPtr64(hWnd, GWL_STYLE, (IntPtr)style);
+        SetWindowLongPtr(hWnd, GWL_STYLE, (IntPtr)style);
 
         // Force the window frame to redraw
         SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,

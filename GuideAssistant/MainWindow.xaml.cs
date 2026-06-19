@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.Messaging;
 using GuideAssistant.Controls;
+using GuideAssistant.Helpers;
 using GuideAssistant.Models;
 using GuideAssistant.Services;
 using GuideAssistant.ViewModels;
@@ -8,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Serilog;
+using System.Runtime.InteropServices;
 using WinRT.Interop;
 
 namespace GuideAssistant;
@@ -20,6 +22,7 @@ public sealed partial class MainWindow : Window
     private readonly SubtitleService _subtitleService;
     private readonly DirectionService _directionService;
     private readonly GameDetector _gameDetector;
+    private readonly HotkeyService _hotkeyService;
 
     private ToolbarWindow? _toolbarWindow;
     private SubtitleOverlay? _subtitleOverlay;
@@ -27,12 +30,16 @@ public sealed partial class MainWindow : Window
     private IntPtr _hwnd;
     private System.Timers.Timer? _subtitleTimeSyncTimer;
 
+    // WndProc subclass for WM_HOTKEY (RegisterHotKey → system-level hotkeys)
+    private Win32Helper.WndProcDelegate? _originalWndProc;
+    private Win32Helper.WndProcDelegate? _wndProcHook;
+
     public MainViewModel ViewModel => _viewModel;
 
     public MainWindow(
         MainViewModel viewModel, TabManager tabManager, WindowManager windowManager,
         SubtitleService subtitleService, DirectionService directionService,
-        GameDetector gameDetector)
+        GameDetector gameDetector, HotkeyService hotkeyService)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -41,6 +48,7 @@ public sealed partial class MainWindow : Window
         _subtitleService = subtitleService;
         _directionService = directionService;
         _gameDetector = gameDetector;
+        _hotkeyService = hotkeyService;
 
         _hwnd = WindowNative.GetWindowHandle(this);
         _windowManager.MainWindowHandle = _hwnd;
@@ -51,6 +59,8 @@ public sealed partial class MainWindow : Window
         InitializeWindow();
         InitializeWebView();
         _viewModel.InitializeHotkeys();
+        _hotkeyService.RegisterSystemHotkeys(_hwnd);
+        SubclassWindowForHotkey();
         _viewModel.InitializeSubtitleSync();
         RestoreWindowState();
         _gameDetector.Start();
@@ -64,6 +74,32 @@ public sealed partial class MainWindow : Window
             ConnectToolbarViewModel();
         }
         catch (Exception ex) { Log.Error(ex, "Failed to create ToolbarWindow"); }
+    }
+
+    private void SubclassWindowForHotkey()
+    {
+        _wndProcHook = OnWndProc;
+        var hookPtr = Marshal.GetFunctionPointerForDelegate(_wndProcHook);
+        var originalPtr = Win32Helper.SetWindowLongPtr(_hwnd, Win32Helper.GWLP_WNDPROC, hookPtr);
+        _originalWndProc = Marshal.GetDelegateForFunctionPointer<Win32Helper.WndProcDelegate>(originalPtr);
+    }
+
+    private IntPtr OnWndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        const uint WM_HOTKEY = 0x0312;
+
+        if (msg == WM_HOTKEY)
+        {
+            if (HotkeyService.SuppressAll)
+                return IntPtr.Zero;
+
+            int id = wParam.ToInt32();
+            _hotkeyService.HandleSystemHotkey(id);
+            return IntPtr.Zero;
+        }
+
+        return _originalWndProc?.Invoke(hwnd, msg, wParam, lParam)
+               ?? Win32Helper.DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
     private void InitializeWindow()
@@ -159,7 +195,10 @@ public sealed partial class MainWindow : Window
         { if (m.Start) StartSubtitleTimeSync(); else StopSubtitleTimeSync(); });
 
         WeakReferenceMessenger.Default.Register<HotkeysReloadMessage>(this, (r, m) =>
-            _viewModel.ReloadHotkeys());
+        {
+            _viewModel.ReloadHotkeys();
+            _hotkeyService.RegisterSystemHotkeys(_hwnd);
+        });
 
         WeakReferenceMessenger.Default.Register<OpenSettingsMessage>(this, (r, m) =>
             OpenSettingsWindow());

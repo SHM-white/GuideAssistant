@@ -176,16 +176,28 @@ public partial class MainViewModel : ObservableObject
     public void InitializeHotkeys()
     {
         _hotkeyService.HotkeyTriggered += HandleHotkeyAction;
-        var profile = _hotkeyRepository.GetDefaultProfile();
-        _hotkeyService.SetBindings(profile?.Bindings ?? new());
+        LoadHotkeyBindings();
         _hotkeyService.Start();
     }
 
     public void ReloadHotkeys()
     {
-        var profile = _hotkeyRepository.GetDefaultProfile();
-        _hotkeyService.SetBindings(profile?.Bindings ?? new());
+        LoadHotkeyBindings();
         Log.Information("Hotkeys reloaded from profile");
+    }
+
+    /// <summary>
+    /// Load hotkey bindings from the database profile.
+    /// EnsureDefaultHotkeys guarantees every known action has a binding in DB.
+    /// </summary>
+    private void LoadHotkeyBindings()
+    {
+        var profile = _hotkeyRepository.GetDefaultProfile();
+        var bindings = profile?.Bindings
+            ?.Where(b => b.VirtualKey != 0)
+            .ToList() ?? new();
+
+        _hotkeyService.SetBindings(bindings);
     }
 
     public void InitializeSubtitleSync()

@@ -35,6 +35,15 @@ namespace GuideAssistant
             ConfigureServices(services);
             Services = services.BuildServiceProvider();
 
+#if DEBUG
+            // Clear database on each debug launch to avoid stale data interference
+            var dbPath = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GuideAssistant", "data.db");
+            try { System.IO.File.Delete(dbPath); Log.Information("DEBUG: Database cleared at {Path}", dbPath); }
+            catch (System.IO.IOException) { /* file may be locked by a previous run */ }
+#endif
+
             // Initialize database
             var db = Services.GetRequiredService<Database>();
             db.Initialize();
@@ -72,6 +81,7 @@ namespace GuideAssistant
                 var mainVm = sp.GetRequiredService<ViewModels.MainViewModel>();
                 return new ViewModels.SettingsViewModel(
                     sp.GetRequiredService<HotkeyRepository>(),
+                    sp.GetRequiredService<HotkeyService>(),
                     mainVm.IsSubtitleEnabled,
                     mainVm.IsMiniMapEnabled,
                     mainVm.Opacity);
@@ -95,9 +105,14 @@ namespace GuideAssistant
                 profile.Id = repo.AddProfile(profile);
             }
 
-            var defaults = new Dictionary<string, (uint vk, string display, string actionDisplay)>
+            // Remove stale bindings that have empty ActionName (dirty data)
+            var staleCount = profile.Bindings.RemoveAll(b => string.IsNullOrEmpty(b.ActionName));
+            if (staleCount > 0)
+                Log.Warning("EnsureDefaultHotkeys: removed {Count} stale bindings with empty ActionName", staleCount);
+
+            var defaults = new Dictionary<string, (int vk, string display, string actionDisplay)>
             {
-                ["play_pause"]        = (0xC0, "`", "播放/暂停"),
+                ["play_pause"]        = (0x50, "P", "播放/暂停"),
                 ["fast_forward"]      = (0x36, "6", "快进"),
                 ["fast_backward"]     = (0x35, "5", "快退"),
                 ["volume_up"]         = (0x39, "9", "音量+"),

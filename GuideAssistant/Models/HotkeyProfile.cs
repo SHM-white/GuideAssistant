@@ -15,7 +15,7 @@ public class HotkeyBinding
     public int ProfileId { get; set; }
     public string ActionName { get; set; } = string.Empty;
     public string ActionDisplay { get; set; } = string.Empty;
-    public uint Modifiers { get; set; }
-    public uint VirtualKey { get; set; }
+    public int Modifiers { get; set; }
+    public int VirtualKey { get; set; }
     public string DisplayText { get; set; } = string.Empty;
 }

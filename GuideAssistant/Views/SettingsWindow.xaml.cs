@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Messaging;
+using GuideAssistant.Services;
 using GuideAssistant.ViewModels;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -11,6 +12,7 @@ namespace GuideAssistant.Views;
 public sealed partial class SettingsWindow : Window
 {
     private readonly SettingsViewModel _viewModel;
+    private int? _pendingKey;
 
     public SettingsWindow(SettingsViewModel viewModel)
     {
@@ -25,6 +27,13 @@ public sealed partial class SettingsWindow : Window
         LoadDisplaySettings();
 
         SettingsNav.SelectedItem = SettingsNav.MenuItems[0];
+
+        // Safety: ensure SuppressAll is cleared when window closes
+        Closed += (s, e) =>
+        {
+            if (_viewModel.IsCapturingKey)
+                _viewModel.CancelKeyCapture();
+        };
     }
 
     private void SetupWindow()
@@ -72,34 +81,41 @@ public sealed partial class SettingsWindow : Window
 
     // ── Hotkeys ──────────────────────────────────────────
 
-    private void HotkeyRebind_Click(object sender, RoutedEventArgs e)
+    private async void HotkeyRebind_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not HyperlinkButton btn || btn.DataContext is not HotkeyRow row)
             return;
 
         _viewModel.StartKeyCaptureCommand.Execute(row);
-        KeyCaptureTitle.Text = _viewModel.KeyCaptureTitle;
-        KeyCaptureOverlay.Visibility = Visibility.Visible;
-        KeyCaptureOverlay.Focus(FocusState.Keyboard);
-    }
+        KeyCaptureDialog.Title = _viewModel.KeyCaptureTitle;
+        _pendingKey = null;
 
-    private void KeyCaptureOverlay_KeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        e.Handled = true;
+        KeyCaptureDialog.Opened += OnKeyCaptureDialogOpened;
+        await KeyCaptureDialog.ShowAsync();
+        KeyCaptureDialog.Opened -= OnKeyCaptureDialogOpened;
 
-        if (e.Key == Windows.System.VirtualKey.Escape)
-        {
+        if (_pendingKey.HasValue)
+            _viewModel.OnKeyCaptured(_pendingKey.Value);
+        else
             _viewModel.CancelKeyCapture();
-            KeyCaptureOverlay.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        uint vk = (uint)(int)e.Key;
-        KeyCaptureOverlay.Visibility = Visibility.Collapsed;
-        _viewModel.OnKeyCaptured(vk);
 
         HotkeyList.ItemsSource = null;
         HotkeyList.ItemsSource = _viewModel.HotkeyRows;
+    }
+
+    private void OnKeyCaptureDialogOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
+    {
+        KeyCaptureContent.Focus(FocusState.Keyboard);
+    }
+
+    private void OnKeyCaptureKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Escape)
+            return; // Let ContentDialog handle ESC via its CloseButton
+
+        e.Handled = true;
+        _pendingKey = (int)e.Key;
+        KeyCaptureDialog.Hide();
     }
 
     private void HotkeyClear_Click(object sender, RoutedEventArgs e)
