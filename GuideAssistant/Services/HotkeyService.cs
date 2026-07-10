@@ -6,7 +6,7 @@ namespace GuideAssistant.Services;
 
 public class HotkeyService : IDisposable
 {
-    private readonly Dictionary<int, (string action, Action callback)> _bindings = new();
+    private readonly Dictionary<int, List<(string action, Action callback)>> _bindings = new();
     private IntPtr _hookId = IntPtr.Zero;
     private LowLevelKeyboardProc? _proc;
     private GCHandle _gcHandle;
@@ -37,10 +37,16 @@ public class HotkeyService : IDisposable
         foreach (var b in bindings)
         {
             if (b.VirtualKey == 0) continue;
-            _bindings[b.VirtualKey] = (b.ActionName, () => HotkeyTriggered?.Invoke(b.ActionName));
+            if (!_bindings.TryGetValue(b.VirtualKey, out var list))
+            {
+                list = new List<(string, Action)>();
+                _bindings[b.VirtualKey] = list;
+            }
+            list.Add((b.ActionName, () => HotkeyTriggered?.Invoke(b.ActionName)));
         }
-        Log.Information("Hotkey bindings updated: {Count} active, keys=[{Keys}]",
-            _bindings.Count, string.Join(",", _bindings.Keys.Select(k => $"0x{k:X}")));
+        Log.Information("Hotkey bindings updated: {Count} keys, total {Total} actions, keys=[{Keys}]",
+            _bindings.Count, _bindings.Values.Sum(v => v.Count),
+            string.Join(",", _bindings.Keys.Select(k => $"0x{k:X}")));
     }
 
     /// <summary>
@@ -94,13 +100,16 @@ public class HotkeyService : IDisposable
                 return CallNextHookEx(_hookId, nCode, wParam, lParam);
             }
 
-            if (_bindings.TryGetValue(vkCode, out var entry))
+            if (_bindings.TryGetValue(vkCode, out var entries))
             {
                 if (!TryAcquireTriggerSlot(vkCode))
                     return CallNextHookEx(_hookId, nCode, wParam, lParam);
 
-                Log.Debug("Hotkey triggered: {Action} (VK={Key})", entry.action, vkCode);
-                entry.callback();
+                foreach (var entry in entries)
+                {
+                    Log.Debug("Hotkey triggered: {Action} (VK={Key})", entry.action, vkCode);
+                    entry.callback();
+                }
                 return CallNextHookEx(_hookId, nCode, wParam, lParam);
             }
             else if (_bindings.Count > 0)
@@ -143,12 +152,14 @@ public class HotkeyService : IDisposable
         ("play_pause",       "播放/暂停",   0xC0),
         ("fast_forward",     "快进",        0x36),
         ("fast_backward",    "快退",        0x35),
-        ("volume_up",        "音量+",       0x39),
-        ("volume_down",      "音量-",       0x38),
-        ("toggle_visibility","显示/隐藏",   0xC0),
-        ("bookmark_page",    "收藏页面",    0x37),
-        ("toggle_subtitle",  "字幕切换",    0x30),
-        ("toggle_minimap",   "小地图切换",  0xC0),
+        ("volume_up",        "音量+",       0x38),
+        ("volume_down",      "音量-",       0x37),
+        ("toggle_visibility","显示/隐藏",   0x30),
+        ("bookmark_page",    "收藏页面",    0xDC),
+        ("toggle_subtitle",  "字幕切换",    0x39),
+        ("toggle_minimap",   "小地图切换",  0x39),
+        ("opacity_up",       "提高透明度",  0xBB),
+        ("opacity_down",     "降低透明度",  0xBD),
     };
 
     public static string VirtualKeyToDisplayName(int vk) => vk switch

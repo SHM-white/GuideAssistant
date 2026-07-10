@@ -237,7 +237,12 @@ public sealed partial class MainWindow : Window
         WeakReferenceMessenger.Default.Register<TabClosedMessage>(this, (r, m) => WebViewControl.RemoveWebView(m.TabId));
 
         WeakReferenceMessenger.Default.Register<VisibilityChangedMessage>(this, (r, m) =>
-        { if (m.IsVisible) AppWindow.Show(); else AppWindow.Hide(); });
+        {
+            if (m.IsVisible)
+                Win32Helper.ShowWindow(_hwnd, Win32Helper.SW_SHOW);
+            else
+                Win32Helper.ShowWindow(_hwnd, Win32Helper.SW_HIDE);
+        });
 
         WeakReferenceMessenger.Default.Register<ExecuteScriptRequestMessage>(this, async (r, m) =>
         {
@@ -374,7 +379,7 @@ public sealed partial class MainWindow : Window
             LeftClickCommand = new RelayCommand(() => ShowToolbarWindow()),
             RightClickCommand = new RelayCommand(() =>
             {
-                var result = Win32Helper.ShowPopupMenu(_hwnd, new[] { "打开工具窗口", "打开设置" });
+                var result = Win32Helper.ShowPopupMenu(_hwnd, new string?[] { "打开工具窗口", "打开设置", null, "退出应用" });
                 switch (result)
                 {
                     case 1:
@@ -382,6 +387,9 @@ public sealed partial class MainWindow : Window
                         break;
                     case 2:
                         OpenSettingsWindow();
+                        break;
+                    case 4:
+                        App.Current.Exit();
                         break;
                 }
             })

@@ -165,6 +165,14 @@ public partial class MainViewModel : ObservableObject
             case "bookmark_page": AddBookmark(); break;
             case "toggle_subtitle": IsSubtitleEnabled = !IsSubtitleEnabled; break;
             case "toggle_minimap": IsMiniMapEnabled = !IsMiniMapEnabled; break;
+            case "opacity_up":
+                Opacity = Math.Min(1.0, Opacity + 0.05);
+                WeakReferenceMessenger.Default.Send(new OpacityChangedMessage(Opacity));
+                break;
+            case "opacity_down":
+                Opacity = Math.Max(0.1, Opacity - 0.05);
+                WeakReferenceMessenger.Default.Send(new OpacityChangedMessage(Opacity));
+                break;
         }
     }
 

@@ -102,21 +102,29 @@ public static class Win32Helper
     }
 
     public const uint MF_STRING = 0x00000000;
+    public const uint MF_SEPARATOR = 0x00000800;
     public const uint TPM_RETURNCMD = 0x0100;
     public const uint TPM_NONOTIFY = 0x0080;
     public const uint WM_COMMAND = 0x0111;
 
     /// <summary>
     /// Shows a simple Win32 context menu at the cursor position. Returns 1-based selected index, or 0 if cancelled.
+    /// Pass null as an item to insert a separator line.
     /// </summary>
-    public static uint ShowPopupMenu(IntPtr ownerHwnd, string[] items)
+    public static uint ShowPopupMenu(IntPtr ownerHwnd, string?[] items)
     {
         GetCursorPos(out var pt);
         SetForegroundWindow(ownerHwnd);
 
         var hMenu = CreatePopupMenu();
+        uint id = 1;
         for (int i = 0; i < items.Length; i++)
-            AppendMenuW(hMenu, MF_STRING, (uint)(i + 1), items[i]);
+        {
+            if (items[i] == null)
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, "");
+            else
+                AppendMenuW(hMenu, MF_STRING, id++, items[i]!);
+        }
 
         var result = (uint)TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY, pt.X, pt.Y, 0, ownerHwnd, IntPtr.Zero);
 
