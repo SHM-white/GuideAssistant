@@ -84,10 +84,11 @@ public class BilibiliApi
                 return null;
             }
             var cid = cidEl.GetInt64();
-            Log.Information("BilibiliApi: bvid={Bvid} cid={Cid}", bvid, cid);
+            var aid = data.TryGetProperty("aid", out var aidEl) ? aidEl.GetInt64() : 0L;
+            Log.Information("BilibiliApi: bvid={Bvid} aid={Aid} cid={Cid}", bvid, aid, cid);
 
-            // Get player info (subtitles)
-            var playerUrl = $"https://api.bilibili.com/x/player/v2?cid={cid}&bvid={bvid}";
+            // Get player info (subtitles) — use wbi/v2 endpoint which is more stable
+            var playerUrl = $"https://api.bilibili.com/x/player/wbi/v2?aid={aid}&cid={cid}";
             var playerResponse = await _http.GetStringAsync(playerUrl);
             using var playerDoc = JsonDocument.Parse(playerResponse);
             var playerData = playerDoc.RootElement.GetProperty("data");
@@ -191,16 +192,8 @@ public class BilibiliApi
 
     public static string? ExtractBvid(string url)
     {
-        if (url.Contains("bilibili.com/video/"))
-        {
-            var idx = url.IndexOf("bilibili.com/video/") + 19;
-            var remaining = url[idx..];
-            var slash = remaining.IndexOf('/');
-            if (slash > 0) return remaining[..slash];
-            var qmark = remaining.IndexOf('?');
-            return qmark > 0 ? remaining[..qmark] : remaining;
-        }
-        return null;
+        var match = System.Text.RegularExpressions.Regex.Match(url, @"BV[a-zA-Z0-9_]{8,}");
+        return match.Success ? match.Value : null;
     }
 }
 

@@ -36,6 +36,8 @@ public class SubtitleService
         var bvid = BilibiliApi.ExtractBvid(url);
         if (bvid == null) return;
 
+        // Immediately clear subtitle overlay when switching videos
+        SubtitleChanged?.Invoke("");
         await StopActiveProvider();
 
         try

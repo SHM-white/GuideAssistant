@@ -95,6 +95,11 @@ public sealed partial class ToolbarWindow : Window
             TabListView.ItemsSource = _tabManager.Tabs;
             SelectActiveTab();
         };
+        _tabManager.PropertyChanged += (s, e) =>
+        {
+            if (e.PropertyName == nameof(TabManager.ActiveTab))
+                SelectActiveTab();
+        };
         TabListView.ItemsSource = _tabManager.Tabs;
         SelectActiveTab();
     }

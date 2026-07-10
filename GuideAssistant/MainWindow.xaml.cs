@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
     private readonly AudioCaptureService _audioCapture;
     private readonly SpeechRecognitionService _speechRecognition;
     private readonly BilibiliApi _bilibiliApi;
+    private ToolbarViewModel? _toolbarVM;
     private WebView2AudioBridge? _audioBridge;
     private SettingsWindow? _settingsWindow;
     private TaskbarIcon? _trayIcon;
@@ -154,6 +155,10 @@ public sealed partial class MainWindow : Window
         {
             _viewModel.CurrentUrl = url;
             _viewModel.UpdateBookmarkState(url);
+
+            // Update toolbar address bar for every navigation
+            _toolbarVM?.OnUrlChanged(url);
+
             if (url.Contains("bilibili.com/video/"))
             {
                 var bvid = BilibiliApi.ExtractBvid(url);
@@ -274,8 +279,8 @@ public sealed partial class MainWindow : Window
 
     private void ConnectToolbarViewModel()
     {
-        var toolbarVm = App.Services.GetRequiredService<ToolbarViewModel>();
-        toolbarVm.NavigateToUrlRequested += url =>
+        _toolbarVM = App.Services.GetRequiredService<ToolbarViewModel>();
+        _toolbarVM.NavigateToUrlRequested += url =>
         {
             if (_tabManager.ActiveTab != null)
             {
@@ -284,7 +289,7 @@ public sealed partial class MainWindow : Window
                 WebViewControl.Navigate(url);
             }
         };
-        toolbarVm.WebViewActionRequested += action =>
+        _toolbarVM.WebViewActionRequested += action =>
         {
             switch (action)
             {
@@ -293,9 +298,9 @@ public sealed partial class MainWindow : Window
                 case WebViewAction.Refresh: WebViewControl.Refresh(); break;
             }
         };
-        toolbarVm.CloseTabRequested += tabId => WebViewControl.RemoveWebView(tabId);
-        toolbarVm.TabSwitched += tab => LoadTab(tab);
-        toolbarVm.SettingsRequested += OpenSettingsWindow;
+        _toolbarVM.CloseTabRequested += tabId => WebViewControl.RemoveWebView(tabId);
+        _toolbarVM.TabSwitched += tab => LoadTab(tab);
+        _toolbarVM.SettingsRequested += OpenSettingsWindow;
     }
 
     private void OpenSettingsWindow()
