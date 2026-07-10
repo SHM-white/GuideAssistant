@@ -37,7 +37,7 @@ public partial class MainViewModel : ObservableObject
     public bool IsSubtitleEnabled
     {
         get => _isSubtitleEnabled;
-        set { if (SetProperty(ref _isSubtitleEnabled, value)) WeakReferenceMessenger.Default.Send(new OverlayToggleMessage("subtitle", value)); }
+        set { if (SetProperty(ref _isSubtitleEnabled, value)) { WeakReferenceMessenger.Default.Send(new OverlayToggleMessage("subtitle", value)); WeakReferenceMessenger.Default.Send(new SubtitleSyncMessage(value)); } }
     }
 
     public bool IsMiniMapEnabled

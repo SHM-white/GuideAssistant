@@ -1,5 +1,4 @@
 using System.Text.Json;
-using GuideAssistant.Models;
 using Serilog;
 
 namespace GuideAssistant.Services;
@@ -7,12 +6,10 @@ namespace GuideAssistant.Services;
 public class SubtitleService
 {
     private readonly BilibiliApi _bilibiliApi;
-    private List<SubtitleItem>? _currentSubtitles;
+    private readonly SpeechRecognitionService _speechRecognition;
+    private ISubtitleProvider? _activeProvider;
     private string? _currentUrl;
-    private Timer? _syncTimer;
     private double _currentTime;
-    private string? _lastSubtitleContent;
-
     public event Action<string>? SubtitleChanged;
     public event Action<string>? DirectionWordDetected;
 
@@ -26,60 +23,76 @@ public class SubtitleService
         "左侧", "右侧", "上面", "下面"
     };
 
-    public SubtitleService(BilibiliApi api)
+    public SubtitleService(BilibiliApi bilibiliApi, SpeechRecognitionService speechRecognition)
     {
-        _bilibiliApi = api;
+        _bilibiliApi = bilibiliApi;
+        _speechRecognition = speechRecognition;
     }
 
     public async Task LoadSubtitle(string url)
     {
         if (url == _currentUrl) return;
         _currentUrl = url;
-        _currentSubtitles = null;
 
+        // Try CC subtitle first
         var data = await _bilibiliApi.GetSubtitle(url);
-        if (data != null)
+        if (data != null && data.Items.Count > 0)
         {
-            _currentSubtitles = data.Items;
-            Log.Information("Subtitle loaded: {Count} items for {Url}", data.Items.Count, url);
+            await StopActiveProvider();
+            var ccProvider = new BilibiliCcProvider(_bilibiliApi);
+            var started = await ccProvider.StartAsync(url);
+            if (started)
+            {
+                ccProvider.SubtitleChanged += OnProviderSubtitleChanged;
+                ccProvider.DirectionWordDetected += OnProviderDirectionDetected;
+                _activeProvider = ccProvider;
+                Log.Information("SubtitleService: CC mode active ({Count} items)", data.Items.Count);
+                return;
+            }
+        }
+
+        // Fallback to speech recognition
+        await StopActiveProvider();
+        try
+        {
+            _speechRecognition.SpeechRecognized += OnSpeechRecognized;
+            await _speechRecognition.StartAsync();
+            Log.Information("SubtitleService: Speech recognition mode active");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "SubtitleService: Speech recognition unavailable");
+            SubtitleChanged?.Invoke("（无可用字幕源）");
         }
     }
 
-    public void StartSync()
+    public void OnSpeechRecognized(string text)
     {
-        _syncTimer?.Dispose();
-        _syncTimer = new Timer(SyncTick, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(250));
+        SubtitleChanged?.Invoke(text);
+        CheckDirectionWords(text);
     }
 
-    public void StopSync()
-    {
-        _syncTimer?.Dispose();
-        _syncTimer = null;
-    }
+    public void StartSync() { }
+
+    public void StopSync() { }
 
     public void UpdateTime(double currentTime)
     {
         _currentTime = currentTime;
+        if (_activeProvider != null)
+        {
+            _activeProvider.UpdateTime(currentTime);
+        }
     }
 
-    private void SyncTick(object? state)
+    private void OnProviderSubtitleChanged(string text)
     {
-        if (_currentSubtitles == null) return;
+        SubtitleChanged?.Invoke(text);
+    }
 
-        var item = _currentSubtitles.FirstOrDefault(s => _currentTime >= s.From && _currentTime <= s.To);
-        if (item != null)
-        {
-            if (item.Content != _lastSubtitleContent)
-            {
-                _lastSubtitleContent = item.Content;
-                SubtitleChanged?.Invoke(item.Content);
-                CheckDirectionWords(item.Content);
-            }
-        }
-        else
-        {
-            _lastSubtitleContent = null;
-        }
+    private void OnProviderDirectionDetected(string word)
+    {
+        DirectionWordDetected?.Invoke(word);
     }
 
     private void CheckDirectionWords(string text)
@@ -94,9 +107,21 @@ public class SubtitleService
         }
     }
 
+    private async Task StopActiveProvider()
+    {
+        if (_activeProvider is BilibiliCcProvider cc)
+        {
+            cc.SubtitleChanged -= OnProviderSubtitleChanged;
+            cc.DirectionWordDetected -= OnProviderDirectionDetected;
+            await cc.StopAsync();
+        }
+        _activeProvider = null;
+    }
+
     public void Dispose()
     {
-        StopSync();
+        _speechRecognition.SpeechRecognized -= OnSpeechRecognized;
+        _ = StopActiveProvider();
     }
 }
 

@@ -4,6 +4,7 @@ using GuideAssistant.Data;
 using GuideAssistant.Services;
 using GuideAssistant.ViewModels;
 using GuideAssistant.Views;
+using GuideAssistant.Overlays;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Serilog;
@@ -80,6 +81,15 @@ namespace GuideAssistant
             services.AddSingleton<DirectionService>();
             services.AddSingleton<GameDetector>();
             services.AddSingleton<ProcessLauncher>();
+
+            // WPF Overlay host
+            var wpfHost = new WpfThreadHost(DirectionService.ParseDirection);
+            wpfHost.Start();
+            services.AddSingleton<IOverlayController>(wpfHost);
+
+            // Audio capture + speech recognition
+            services.AddSingleton<Services.AudioCaptureService>();
+            services.AddSingleton<Services.SpeechRecognitionService>();
 
             // ViewModels
             services.AddSingleton<ViewModels.MainViewModel>();

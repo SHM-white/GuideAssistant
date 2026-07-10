@@ -17,6 +17,8 @@ public sealed partial class WebViewContainer : UserControl
     private Microsoft.UI.Xaml.Controls.WebView2? _webView;
     private TabManager? _tabManager;
 
+    public CoreWebView2? CurrentCoreWebView2 => _webView?.CoreWebView2;
+
     public event Action<string>? TitleChanged;
     public event Action<string>? UrlChanged;
     public event Action<bool>? LoadingStateChanged;

@@ -4,6 +4,7 @@ using GuideAssistant.Controls;
 using GuideAssistant.Helpers;
 using GuideAssistant.Models;
 using GuideAssistant.Services;
+using GuideAssistant.Overlays;
 using GuideAssistant.ViewModels;
 using GuideAssistant.Views;
 using H.NotifyIcon;
@@ -27,8 +28,10 @@ public sealed partial class MainWindow : Window
     private readonly HotkeyConfigManager _hotkeyConfigManager;
 
     private ToolbarWindow? _toolbarWindow;
-    private SubtitleOverlay? _subtitleOverlay;
-    private MiniMapOverlay? _miniMapOverlay;
+    private readonly IOverlayController _overlayCtrl;
+    private readonly AudioCaptureService _audioCapture;
+    private readonly SpeechRecognitionService _speechRecognition;
+    private WebView2AudioBridge? _audioBridge;
     private SettingsWindow? _settingsWindow;
     private TaskbarIcon? _trayIcon;
     private IntPtr _hwnd;
@@ -39,7 +42,8 @@ public sealed partial class MainWindow : Window
     public MainWindow(
         MainViewModel viewModel, TabManager tabManager, WindowManager windowManager,
         SubtitleService subtitleService, DirectionService directionService,
-        GameDetector gameDetector, HotkeyService hotkeyService, HotkeyConfigManager hotkeyConfigManager)
+        GameDetector gameDetector, HotkeyService hotkeyService, HotkeyConfigManager hotkeyConfigManager,
+        IOverlayController overlayCtrl, AudioCaptureService audioCapture, SpeechRecognitionService speechRecognition)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -50,6 +54,9 @@ public sealed partial class MainWindow : Window
         _gameDetector = gameDetector;
         _hotkeyService = hotkeyService;
         _hotkeyConfigManager = hotkeyConfigManager;
+        _overlayCtrl = overlayCtrl;
+        _audioCapture = audioCapture;
+        _speechRecognition = speechRecognition;
 
         // React to hotkey binding changes (from Settings or elsewhere)
         _hotkeyConfigManager.BindingsChanged += () =>
@@ -106,18 +113,13 @@ public sealed partial class MainWindow : Window
     {
         ShowToolbarWindow();
 
-        if (_viewModel.IsSubtitleEnabled && _subtitleOverlay is null)
+        if (_viewModel.IsSubtitleEnabled && !_overlayCtrl.IsSubtitleVisible)
         {
-            _subtitleOverlay = new SubtitleOverlay(_subtitleService);
-            _subtitleOverlay.Closed += (s, e) => _subtitleOverlay = null;
-            _subtitleOverlay.Activate();
-            _subtitleService.StartSync();
+            _overlayCtrl.ShowSubtitle();
         }
-        if (_viewModel.IsMiniMapEnabled && _miniMapOverlay is null)
+        if (_viewModel.IsMiniMapEnabled && !_overlayCtrl.IsMiniMapVisible)
         {
-            _miniMapOverlay = new MiniMapOverlay(_directionService);
-            _miniMapOverlay.Closed += (s, e) => _miniMapOverlay = null;
-            _miniMapOverlay.Activate();
+            _overlayCtrl.ShowMiniMap();
         }
     }
 
@@ -149,9 +151,24 @@ public sealed partial class MainWindow : Window
             _viewModel.CurrentUrl = url;
             _viewModel.UpdateBookmarkState(url);
             if (url.Contains("bilibili.com/video/"))
+            {
                 _ = _subtitleService.LoadSubtitle(url);
+                if (_audioBridge == null)
+                {
+                    var wv = WebViewControl.CurrentCoreWebView2;
+                    if (wv != null)
+                    {
+                        _audioBridge = new WebView2AudioBridge(wv, _audioCapture);
+                        _ = _audioBridge.InitializeAsync();
+                    }
+                }
+            }
         };
         WebViewControl.LoadingStateChanged += isLoading => _viewModel.IsLoading = isLoading;
+        _subtitleService.SubtitleChanged += text =>
+        {
+            DispatcherQueue.TryEnqueue(() => _overlayCtrl.UpdateSubtitle(text));
+        };
         if (_tabManager.ActiveTab != null) LoadTab(_tabManager.ActiveTab);
     }
 
@@ -193,18 +210,26 @@ public sealed partial class MainWindow : Window
         {
             if (m.Type == "subtitle")
             {
-                if (m.Enabled) { _subtitleOverlay = new SubtitleOverlay(_subtitleService); _subtitleOverlay.Closed += (s, e) => _subtitleOverlay = null; _subtitleOverlay.Activate(); _subtitleService.StartSync(); }
-                else { _subtitleService.StopSync(); _subtitleOverlay?.Close(); _subtitleOverlay = null; }
+                if (m.Enabled) { _overlayCtrl.ShowSubtitle(); }
+                else { _overlayCtrl.HideSubtitle(); }
             }
             else if (m.Type == "minimap")
             {
-                if (m.Enabled) { _miniMapOverlay = new MiniMapOverlay(_directionService); _miniMapOverlay.Closed += (s, e) => _miniMapOverlay = null; _miniMapOverlay.Activate(); }
-                else { _miniMapOverlay?.Close(); _miniMapOverlay = null; }
+                if (m.Enabled) { _overlayCtrl.ShowMiniMap(); }
+                else { _overlayCtrl.HideMiniMap(); }
             }
         });
 
+        WeakReferenceMessenger.Default.Register<DirectionWordMessage>(this, (r, m) =>
+        {
+            _overlayCtrl.ShowDirection(m.Word);
+        });
+
         WeakReferenceMessenger.Default.Register<SubtitleSyncMessage>(this, (r, m) =>
-        { if (m.Start) StartSubtitleTimeSync(); else StopSubtitleTimeSync(); });
+        {
+            if (m.Start) StartSubtitleTimeSync();
+            else { StopSubtitleTimeSync(); _overlayCtrl.UpdateSubtitle(""); }
+        });
 
         WeakReferenceMessenger.Default.Register<OpenSettingsMessage>(this, (r, m) =>
             OpenSettingsWindow());
@@ -353,12 +378,16 @@ public sealed partial class MainWindow : Window
     {
         SaveWindowState();
         StopSubtitleTimeSync();
-        _subtitleOverlay?.Close();
-        _miniMapOverlay?.Close();
+        _overlayCtrl.HideSubtitle();
+        _overlayCtrl.HideMiniMap();
+        _overlayCtrl.Dispose();
         _toolbarWindow?.CloseForReal();
         _settingsWindow?.Close();
         _viewModel.Cleanup();
         _gameDetector.Dispose();
+        _speechRecognition.StopAsync().GetAwaiter().GetResult();
+        _speechRecognition.Dispose();
+        _audioBridge?.Dispose();
         Log.Information("Application shutting down");
     }
 }
