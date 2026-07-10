@@ -31,6 +31,7 @@ public sealed partial class MainWindow : Window
     private readonly IOverlayController _overlayCtrl;
     private readonly AudioCaptureService _audioCapture;
     private readonly SpeechRecognitionService _speechRecognition;
+    private readonly BilibiliApi _bilibiliApi;
     private WebView2AudioBridge? _audioBridge;
     private SettingsWindow? _settingsWindow;
     private TaskbarIcon? _trayIcon;
@@ -43,7 +44,8 @@ public sealed partial class MainWindow : Window
         MainViewModel viewModel, TabManager tabManager, WindowManager windowManager,
         SubtitleService subtitleService, DirectionService directionService,
         GameDetector gameDetector, HotkeyService hotkeyService, HotkeyConfigManager hotkeyConfigManager,
-        IOverlayController overlayCtrl, AudioCaptureService audioCapture, SpeechRecognitionService speechRecognition)
+        IOverlayController overlayCtrl, AudioCaptureService audioCapture, SpeechRecognitionService speechRecognition,
+        BilibiliApi bilibiliApi)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -57,6 +59,7 @@ public sealed partial class MainWindow : Window
         _overlayCtrl = overlayCtrl;
         _audioCapture = audioCapture;
         _speechRecognition = speechRecognition;
+        _bilibiliApi = bilibiliApi;
 
         // React to hotkey binding changes (from Settings or elsewhere)
         _hotkeyConfigManager.BindingsChanged += () =>
@@ -116,6 +119,7 @@ public sealed partial class MainWindow : Window
         if (_viewModel.IsSubtitleEnabled && !_overlayCtrl.IsSubtitleVisible)
         {
             _overlayCtrl.ShowSubtitle();
+            StartSubtitleTimeSync();
         }
         if (_viewModel.IsMiniMapEnabled && !_overlayCtrl.IsMiniMapVisible)
         {
@@ -152,21 +156,54 @@ public sealed partial class MainWindow : Window
             _viewModel.UpdateBookmarkState(url);
             if (url.Contains("bilibili.com/video/"))
             {
+                var bvid = BilibiliApi.ExtractBvid(url);
+                Log.Information("MainWindow: B站 video detected, url={Url} bvid={Bvid}", url, bvid);
+
+                _subtitleService.SetCoreWebView(WebViewControl.CurrentCoreWebView2);
                 _ = _subtitleService.LoadSubtitle(url);
-                if (_audioBridge == null)
+
+                _audioBridge?.Dispose();
+                _audioBridge = null;
+                var wv = WebViewControl.CurrentCoreWebView2;
+                if (wv != null)
                 {
-                    var wv = WebViewControl.CurrentCoreWebView2;
-                    if (wv != null)
+                    _audioBridge = new WebView2AudioBridge(wv, _audioCapture);
+                    _ = _audioBridge.InitializeAsync();
+
+                    // Extract B站 cookies for API authentication
+                    _ = ExtractBilibiliCookiesAsync(wv);
+
+                    // Listen for debug and subtitle-intercept messages from injected JS
+                    wv.WebMessageReceived += (s, msg) =>
                     {
-                        _audioBridge = new WebView2AudioBridge(wv, _audioCapture);
-                        _ = _audioBridge.InitializeAsync();
-                    }
+                        var txt = msg.TryGetWebMessageAsString();
+                        if (string.IsNullOrEmpty(txt)) return;
+                        if (txt.StartsWith("__gv_debug:"))
+                        {
+                            Log.Information("[WebView] {Msg}", txt);
+                        }
+                        else if (txt.StartsWith("__gv_subtitle_json:"))
+                        {
+                            // Format: __gv_subtitle_json:bvid:json_body
+                            var payload = txt["__gv_subtitle_json:".Length..];
+                            var sep = payload.IndexOf(':');
+                            if (sep > 0)
+                            {
+                                var bvid = payload[..sep];
+                                var json = payload[(sep + 1)..];
+                                BilibiliApi.CacheInterceptedSubtitle(bvid, json);
+                                // Replace provider data with intercepted (accurate) subtitle
+                                _ = _subtitleService.ReplaceWithInterceptedAsync(bvid, json);
+                            }
+                        }
+                    };
                 }
             }
         };
         WebViewControl.LoadingStateChanged += isLoading => _viewModel.IsLoading = isLoading;
         _subtitleService.SubtitleChanged += text =>
         {
+            Log.Information("MainWindow subtitle received: \"{Text}\" (overlay visible={Vis})", text, _overlayCtrl.IsSubtitleVisible);
             DispatcherQueue.TryEnqueue(() => _overlayCtrl.UpdateSubtitle(text));
         };
         if (_tabManager.ActiveTab != null) LoadTab(_tabManager.ActiveTab);
@@ -210,8 +247,8 @@ public sealed partial class MainWindow : Window
         {
             if (m.Type == "subtitle")
             {
-                if (m.Enabled) { _overlayCtrl.ShowSubtitle(); }
-                else { _overlayCtrl.HideSubtitle(); }
+                if (m.Enabled) { _overlayCtrl.ShowSubtitle(); StartSubtitleTimeSync(); }
+                else { StopSubtitleTimeSync(); _overlayCtrl.HideSubtitle(); }
             }
             else if (m.Type == "minimap")
             {
@@ -389,5 +426,26 @@ public sealed partial class MainWindow : Window
         _speechRecognition.Dispose();
         _audioBridge?.Dispose();
         Log.Information("Application shutting down");
+    }
+
+    private async Task ExtractBilibiliCookiesAsync(Microsoft.Web.WebView2.Core.CoreWebView2 wv)
+    {
+        try
+        {
+            var cookieManager = wv.CookieManager;
+            var cookies = await cookieManager.GetCookiesAsync("https://bilibili.com");
+            var names = new[] { "SESSDATA", "bili_jct", "DedeUserID", "DedeUserID__ckMd5", "buvid3", "buvid4" };
+            var parts = new List<string>();
+            foreach (var c in cookies)
+            {
+                if (names.Contains(c.Name))
+                    parts.Add($"{c.Name}={c.Value}");
+            }
+            _bilibiliApi.SetCookies(string.Join("; ", parts));
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to extract B站 cookies");
+        }
     }
 }

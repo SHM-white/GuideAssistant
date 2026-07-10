@@ -38,6 +38,9 @@ public class SpeechRecognitionService : IDisposable
         var dictation = new DictationGrammar();
         _engine.LoadGrammar(dictation);
 
+        _audioCapture.AudioDataAvailable += OnAudioData;
+        await _audioCapture.StartAsync();
+
         if (_audioCapture.ActiveMode == CaptureMode.WebView2)
         {
             _audioStream = new MemoryStream();
@@ -46,16 +49,21 @@ public class SpeechRecognitionService : IDisposable
         }
         else
         {
-            _engine.SetInputToDefaultAudioDevice();
+            try
+            {
+                _engine.SetInputToDefaultAudioDevice();
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Warning(ex, "No default audio input device — speech recognition disabled");
+                return;
+            }
         }
 
         _engine.InitialSilenceTimeout = TimeSpan.FromSeconds(2);
         _engine.BabbleTimeout = TimeSpan.FromSeconds(3);
         _engine.EndSilenceTimeout = TimeSpan.FromSeconds(1);
         _engine.EndSilenceTimeoutAmbiguous = TimeSpan.FromSeconds(1.5);
-
-        _audioCapture.AudioDataAvailable += OnAudioData;
-        await _audioCapture.StartAsync();
 
         StartSingleRecognition();
         _isRunning = true;

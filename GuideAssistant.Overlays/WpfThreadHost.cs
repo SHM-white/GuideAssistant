@@ -108,6 +108,10 @@ public class WpfThreadHost : IOverlayController
     {
         _dispatcher?.InvokeAsync(() =>
         {
+            if (_subtitle == null && !string.IsNullOrEmpty(text))
+            {
+                ShowSubtitle();
+            }
             _subtitle?.ShowText(text);
         });
     }

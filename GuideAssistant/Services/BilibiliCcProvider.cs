@@ -8,7 +8,7 @@ public interface ISubtitleProvider
 {
     event Action<string>? SubtitleChanged;
     event Action<string>? DirectionWordDetected;
-    Task<bool> StartAsync(string url);
+    Task<bool> StartAsync(string url, SubtitleData? data = null);
     Task StopAsync();
     void UpdateTime(double currentTime);
 }
@@ -39,13 +39,24 @@ public class BilibiliCcProvider : ISubtitleProvider, IDisposable
         _bilibiliApi = bilibiliApi;
     }
 
-    public async Task<bool> StartAsync(string url)
+    public async Task<bool> StartAsync(string url, SubtitleData? data = null)
     {
-        var data = await _bilibiliApi.GetSubtitle(url);
-        if (data == null || data.Items.Count == 0) return false;
+        // Dispose old timer before replacing
+        _syncTimer?.Stop();
+        _syncTimer?.Dispose();
 
-        _subtitles = data.Items;
-        Log.Information("Bilibili CC subtitle loaded: {Count} items", data.Items.Count);
+        if (data != null)
+        {
+            _subtitles = data.Items;
+        }
+        else
+        {
+            var result = await _bilibiliApi.GetSubtitle(url);
+            if (result == null || result.Items.Count == 0) return false;
+            _subtitles = result.Items;
+        }
+        _lastContent = null;
+        Log.Information("Bilibili CC subtitle loaded: {Count} items", _subtitles!.Count);
 
         _syncTimer = new Timer(250) { AutoReset = true };
         _syncTimer.Elapsed += SyncTick;
@@ -78,6 +89,7 @@ public class BilibiliCcProvider : ISubtitleProvider, IDisposable
             if (item.Content != _lastContent)
             {
                 _lastContent = item.Content;
+                Log.Information("BilibiliCc: time={Time:F1}s text=\"{Text}\"", _currentTime, item.Content);
                 SubtitleChanged?.Invoke(item.Content);
                 CheckDirectionWords(item.Content);
             }

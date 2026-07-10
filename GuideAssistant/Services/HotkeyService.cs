@@ -145,10 +145,10 @@ public class HotkeyService : IDisposable
         ("fast_backward",    "快退",        0x35),
         ("volume_up",        "音量+",       0x39),
         ("volume_down",      "音量-",       0x38),
-        ("toggle_visibility","显示/隐藏",   0x48),
-        ("bookmark_page",    "收藏页面",    0x42),
-        ("toggle_subtitle",  "字幕切换",    0x53),
-        ("toggle_minimap",   "小地图切换",  0x4D),
+        ("toggle_visibility","显示/隐藏",   0xC0),
+        ("bookmark_page",    "收藏页面",    0x37),
+        ("toggle_subtitle",  "字幕切换",    0x30),
+        ("toggle_minimap",   "小地图切换",  0xC0),
     };
 
     public static string VirtualKeyToDisplayName(int vk) => vk switch

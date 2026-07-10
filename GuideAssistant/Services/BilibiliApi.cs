@@ -7,53 +7,158 @@ namespace GuideAssistant.Services;
 public class BilibiliApi
 {
     private readonly HttpClient _http;
+    private string? _cookieHeader;
+
+    // Intercepted subtitle data from WebView2 fetch interceptor (keyed by bvid)
+    private static readonly Dictionary<string, SubtitleData> InterceptedCache = new();
 
     public BilibiliApi()
     {
         _http = new HttpClient();
         _http.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         _http.DefaultRequestHeaders.Add("Referer", "https://www.bilibili.com");
+        _http.DefaultRequestHeaders.Add("Origin", "https://www.bilibili.com");
+    }
+
+    /// <summary>Set cookies extracted from WebView2 for API authentication.</summary>
+    public void SetCookies(string cookies)
+    {
+        if (string.IsNullOrEmpty(cookies)) return;
+        _cookieHeader = cookies;
+        _http.DefaultRequestHeaders.Remove("Cookie");
+        _http.DefaultRequestHeaders.TryAddWithoutValidation("Cookie", cookies);
+        Log.Information("BilibiliApi: cookies set (length={Len})", cookies.Length);
+    }
+
+    /// <summary>Store subtitle data intercepted from WebView2 fetch/XHR.</summary>
+    public static void CacheInterceptedSubtitle(string bvid, string jsonBody)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonBody);
+            var body = doc.RootElement.GetProperty("body");
+            var items = new List<SubtitleItem>();
+            foreach (var item in body.EnumerateArray())
+            {
+                items.Add(new SubtitleItem
+                {
+                    From = item.GetProperty("from").GetDouble(),
+                    To = item.GetProperty("to").GetDouble(),
+                    Content = item.GetProperty("content").GetString() ?? ""
+                });
+            }
+            InterceptedCache[bvid] = new SubtitleData { Items = items };
+            Log.Information("BilibiliApi: intercepted subtitle cached for bvid={Bvid}, {Count} items", bvid, items.Count);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "BilibiliApi: failed to parse intercepted subtitle for {Bvid}", bvid);
+        }
     }
 
     public async Task<SubtitleData?> GetSubtitle(string url)
     {
         try
         {
-            // Extract aid or bvid from URL
             var bvid = ExtractBvid(url);
             if (bvid == null) return null;
+
+            // Check intercepted cache first (data captured from WebView2 fetch)
+            lock (InterceptedCache)
+            {
+                if (InterceptedCache.TryGetValue(bvid, out var cached))
+                {
+                    Log.Information("BilibiliApi: using intercepted subtitle for bvid={Bvid}, {Count} items", bvid, cached.Items.Count);
+                    return cached;
+                }
+            }
 
             // Get video info
             var apiUrl = $"https://api.bilibili.com/x/web-interface/view?bvid={bvid}";
             var response = await _http.GetStringAsync(apiUrl);
             using var doc = JsonDocument.Parse(response);
             var data = doc.RootElement.GetProperty("data");
-            var cid = data.GetProperty("cid").GetInt64();
+            if (!data.TryGetProperty("cid", out var cidEl))
+            {
+                Log.Warning("BilibiliApi: no cid in response for {Bvid}", bvid);
+                return null;
+            }
+            var cid = cidEl.GetInt64();
+            Log.Information("BilibiliApi: bvid={Bvid} cid={Cid}", bvid, cid);
 
             // Get player info (subtitles)
             var playerUrl = $"https://api.bilibili.com/x/player/v2?cid={cid}&bvid={bvid}";
             var playerResponse = await _http.GetStringAsync(playerUrl);
             using var playerDoc = JsonDocument.Parse(playerResponse);
-            var subtitleJson = playerDoc.RootElement
-                .GetProperty("data")
-                .GetProperty("subtitle")
-                .GetProperty("subtitles");
+            var playerData = playerDoc.RootElement.GetProperty("data");
+
+            if (!playerData.TryGetProperty("subtitle", out var subtitleWrap))
+            {
+                Log.Debug("BilibiliApi: no subtitle field in player response for {Bvid}", bvid);
+                return null;
+            }
+            if (!subtitleWrap.TryGetProperty("subtitles", out var subtitleJson))
+            {
+                Log.Debug("BilibiliApi: no subtitles array in response for {Bvid}", bvid);
+                return null;
+            }
+
+            Log.Debug("BilibiliApi: subtitle candidate languages: {Langs}",
+                string.Join(",", subtitleJson.EnumerateArray().Select(s =>
+                {
+                    try { return s.GetProperty("lan").GetString() ?? "?"; }
+                    catch { return "?"; }
+                })));
 
             if (subtitleJson.GetArrayLength() == 0) return null;
 
-            // Prefer Chinese subtitle
+            // Dump subtitle candidates for debugging
+            foreach (var sub in subtitleJson.EnumerateArray())
+            {
+                try
+                {
+                    var raw = sub.GetRawText();
+                    Log.Information("BilibiliApi: subtitle candidate raw={Raw}", raw);
+                }
+                catch { }
+            }
+
+            // Prefer Chinese subtitle (including AI-generated)
             var subtitle = subtitleJson.EnumerateArray()
-                .FirstOrDefault(s => s.GetProperty("lan").GetString() == "zh-CN" ||
-                                     s.GetProperty("lan").GetString() == "zh-Hans" ||
-                                     s.GetProperty("lan_doc").GetString()?.Contains("中文") == true);
+                .FirstOrDefault(s =>
+                {
+                    var lan = s.GetProperty("lan").GetString();
+                    return lan == "zh-CN" || lan == "zh-Hans" || lan == "ai-zh" ||
+                           (s.TryGetProperty("lan_doc", out var ld) &&
+                            (ld.GetString()?.Contains("中文") == true || ld.GetString()?.Contains("AI") == true));
+                });
 
             // Fallback to first
             if (subtitle.ValueKind == JsonValueKind.Undefined)
                 subtitle = subtitleJson[0];
 
-            var subtitleUrl = subtitle.GetProperty("subtitle_url").GetString()!;
+            // Try subtitle_url first, fallback to url field
+            var subtitleUrl = "";
+            if (subtitle.TryGetProperty("subtitle_url", out var surl) && !string.IsNullOrWhiteSpace(surl.GetString()))
+            {
+                subtitleUrl = surl.GetString()!;
+            }
+            else if (subtitle.TryGetProperty("url", out var u) && !string.IsNullOrWhiteSpace(u.GetString()))
+            {
+                subtitleUrl = u.GetString()!;
+            }
+
+            if (string.IsNullOrWhiteSpace(subtitleUrl))
+            {
+                Log.Warning("BilibiliApi: subtitle URL is empty for bvid={Bvid}", bvid);
+                return null;
+            }
+
             if (!subtitleUrl.StartsWith("http"))
                 subtitleUrl = $"https:{subtitleUrl}";
+
+            var lan = subtitle.GetProperty("lan").GetString() ?? "?";
+            Log.Information("BilibiliApi: fetching subtitle lang={Lang} url={Url}", lan, subtitleUrl);
 
             var subtitleContent = await _http.GetStringAsync(subtitleUrl);
             using var subDoc = JsonDocument.Parse(subtitleContent);
@@ -70,6 +175,11 @@ public class BilibiliApi
                 });
             }
 
+            // Log first 5 items for debugging
+            var preview = items.Take(5).Select(i => $"[{i.From:F1}s] {i.Content}");
+            Log.Information("BilibiliApi: {Count} subtitle items loaded, preview: {Preview}",
+                items.Count, string.Join(" | ", preview));
+
             return new SubtitleData { Items = items };
         }
         catch (Exception ex)
@@ -79,7 +189,7 @@ public class BilibiliApi
         }
     }
 
-    private static string? ExtractBvid(string url)
+    public static string? ExtractBvid(string url)
     {
         if (url.Contains("bilibili.com/video/"))
         {

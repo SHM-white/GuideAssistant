@@ -148,6 +148,153 @@ window.__gv_player = {
 };";
         _ = wv.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(playerScript);
 
+        // Inject fetch interceptor to capture B站 subtitle data loaded by the player
+        var fetchInterceptScript = @"
+(function() {
+  if (window.__gv_fetchIntercept) return;
+  window.__gv_fetchIntercept = true;
+
+  function extractBvid() {
+    var m = location.href.match(/bilibili\.com\/video\/([A-Za-z0-9]+)/);
+    return m ? m[1] : '';
+  }
+
+  function sendSubtitle(text, bvid) {
+    try { chrome.webview.postMessage('__gv_subtitle_json:' + bvid + ':' + text); } catch(e) {}
+  }
+
+  var origFetch = window.fetch;
+  window.fetch = function() {
+    var url = arguments[0] && typeof arguments[0] === 'string' ? arguments[0] : (arguments[0] && arguments[0].url ? arguments[0].url : '');
+    return origFetch.apply(this, arguments).then(function(response) {
+      if (url.indexOf('aisubtitle.hdslb.com') !== -1) {
+        try {
+          var clone = response.clone();
+          clone.text().then(function(text) {
+            sendSubtitle(text, extractBvid());
+          });
+        } catch(e) {}
+      }
+      return response;
+    });
+  };
+
+  var origOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    this.__gv_url = url;
+    return origOpen.apply(this, arguments);
+  };
+  var origSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function() {
+    var self = this;
+    var url = self.__gv_url || '';
+    if (url.indexOf('aisubtitle.hdslb.com') !== -1) {
+      self.addEventListener('load', function() {
+        try { sendSubtitle(self.responseText, extractBvid()); } catch(e) {}
+      });
+    }
+    return origSend.apply(this, arguments);
+  };
+})();";
+        _ = wv.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(fetchInterceptScript);
+
+        // Inject CC subtitle DOM observer (handles Shadow DOM + body fallback, with debug logging)
+        var ccScript = @"
+(function() {
+  if (window.__gv_ccObserver) return;
+  window.__gv_ccObserver = true;
+  var lastText = '';
+  var debugTick = 0;
+
+  function getPlayerBounds() {
+    var p = document.querySelector('bpx-player');
+    if (!p) return null;
+    return p.getBoundingClientRect();
+  }
+
+  function scanTree(root, plrRect) {
+    var matched = [];
+    var allCandidates = [];
+    var treeWalker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, function(el) {
+      var r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 10) return NodeFilter.FILTER_SKIP;
+      var t = (el.textContent || '').trim();
+      if (t.length <= 1 || t.length >= 300) return NodeFilter.FILTER_SKIP;
+      allCandidates.push({text:t.substring(0,50), top:r.top.toFixed(0), bottom:r.bottom.toFixed(0), left:r.left.toFixed(0)});
+      if (plrRect) {
+        var bottomZone = plrRect.top + plrRect.height * 0.5;
+        if (r.top < bottomZone || r.bottom > plrRect.bottom + 2) return NodeFilter.FILTER_SKIP;
+        if (r.left < plrRect.left - 5 || r.right > plrRect.right + 5) return NodeFilter.FILTER_SKIP;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    });
+    var node;
+    while (node = treeWalker.nextNode()) {
+      matched.push((node.textContent || '').trim());
+    }
+    return { matched: matched, allCandidates: allCandidates };
+  }
+
+  function findSubtitleText() {
+    var player = document.querySelector('bpx-player');
+    var plrRect = getPlayerBounds();
+    if (player && player.shadowRoot) {
+      var result = scanTree(player.shadowRoot, plrRect);
+      debugTick++;
+      if (debugTick % 3 === 0 && (result.matched.length > 0 || result.allCandidates.length > 0)) {
+        try {
+          chrome.webview.postMessage('__gv_debug:shadow matched=' + JSON.stringify(result.matched.slice(0,3)) + ' candidates=' + JSON.stringify(result.allCandidates.slice(0,5)));
+        } catch(e) {}
+      }
+      if (result.matched.length > 0) return result.matched[result.matched.length - 1];
+    }
+    // Fallback: scan document.body for subtitle-like elements
+    var bodyResult = scanTree(document.body, plrRect);
+    if (debugTick % 5 === 0 && bodyResult.matched.length > 0) {
+      try {
+        chrome.webview.postMessage('__gv_debug:body matched=' + JSON.stringify(bodyResult.matched.slice(0,3)));
+      } catch(e) {}
+    }
+    if (bodyResult.matched.length > 0) return bodyResult.matched[bodyResult.matched.length - 1];
+    return '';
+  }
+
+  function sendIfChanged(text) {
+    if (text && text !== lastText) {
+      lastText = text;
+      try { chrome.webview.postMessage('__gv_cc:' + text); } catch(e) {}
+      try { chrome.webview.postMessage('__gv_debug:cc_text=' + text); } catch(e) {}
+    }
+  }
+
+  function observeShadow(shadow) {
+    if (!shadow || shadow.__gv_observed) return;
+    shadow.__gv_observed = true;
+    var obs = new MutationObserver(function() {
+      var t = findSubtitleText();
+      sendIfChanged(t);
+    });
+    obs.observe(shadow, {childList: true, subtree: true, characterData: true});
+  }
+
+  // Also observe document body for non-shadow-DOM subtitle elements
+  var bodyObs = new MutationObserver(function() {
+    var t = findSubtitleText();
+    sendIfChanged(t);
+  });
+  bodyObs.observe(document.body, {childList: true, subtree: true, characterData: true});
+
+  setInterval(function() {
+    var text = findSubtitleText();
+    sendIfChanged(text);
+    var player = document.querySelector('bpx-player');
+    if (player && player.shadowRoot) {
+      observeShadow(player.shadowRoot);
+    }
+  }, 500);
+})();";
+        _ = wv.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(ccScript);
+
         // Prevent new window popups — navigate in same WebView
         wv.CoreWebView2.NewWindowRequested += (s, e) =>
         {
@@ -165,14 +312,6 @@ window.__gv_player = {
             tab.Title = string.IsNullOrEmpty(title) ? "新标签页" : title;
             if (wv == _webView)
                 TitleChanged?.Invoke(tab.Title);
-        };
-
-        wv.CoreWebView2.SourceChanged += (s, e) =>
-        {
-            var sourceUrl = wv.Source?.ToString() ?? "";
-            tab.Url = sourceUrl;
-            if (wv == _webView)
-                UrlChanged?.Invoke(sourceUrl);
         };
 
         wv.CoreWebView2.NavigationStarting += (s, e) =>
@@ -197,6 +336,12 @@ window.__gv_player = {
 
             tab.CanGoBack = wv.CoreWebView2.CanGoBack;
             tab.CanGoForward = wv.CoreWebView2.CanGoForward;
+
+            // Fire URL change only on real navigations (not pushState/hash changes)
+            var sourceUrl = wv.Source?.ToString() ?? "";
+            tab.Url = sourceUrl;
+            if (wv == _webView)
+                UrlChanged?.Invoke(sourceUrl);
         };
 
         Log.Information("WebView2 initialized for tab: {Id}", tab.Id);
