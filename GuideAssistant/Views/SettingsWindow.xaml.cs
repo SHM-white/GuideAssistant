@@ -133,11 +133,14 @@ public sealed partial class SettingsWindow : Window
     {
         SubtitleToggle.IsChecked = _viewModel.IsSubtitleEnabled;
         MinimapToggle.IsChecked = _viewModel.IsMiniMapEnabled;
+        MinimapFilterToggle.IsChecked = _viewModel.IsMinimapFilterEnabled;
 
         SubtitleToggle.Checked += (s, e) => _viewModel.IsSubtitleEnabled = true;
         SubtitleToggle.Unchecked += (s, e) => _viewModel.IsSubtitleEnabled = false;
         MinimapToggle.Checked += (s, e) => _viewModel.IsMiniMapEnabled = true;
         MinimapToggle.Unchecked += (s, e) => _viewModel.IsMiniMapEnabled = false;
+        MinimapFilterToggle.Checked += (s, e) => _viewModel.IsMinimapFilterEnabled = true;
+        MinimapFilterToggle.Unchecked += (s, e) => _viewModel.IsMinimapFilterEnabled = false;
 
         OpacitySlider.Value = _viewModel.Opacity;
         OpacityLabel.Text = _viewModel.OpacityLabel;

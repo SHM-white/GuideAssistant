@@ -323,6 +323,8 @@ public sealed partial class MainWindow : Window
                 _viewModel.IsSubtitleEnabled = settingsVm.IsSubtitleEnabled;
             else if (e.PropertyName == nameof(SettingsViewModel.IsMiniMapEnabled))
                 _viewModel.IsMiniMapEnabled = settingsVm.IsMiniMapEnabled;
+            else if (e.PropertyName == nameof(SettingsViewModel.IsMinimapFilterEnabled))
+                _viewModel.IsMinimapFilterEnabled = settingsVm.IsMinimapFilterEnabled;
             else if (e.PropertyName == nameof(SettingsViewModel.Opacity))
                 WeakReferenceMessenger.Default.Send(new OpacityChangedMessage(settingsVm.Opacity));
         };

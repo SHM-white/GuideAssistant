@@ -11,15 +11,7 @@ public class DomCcProvider : ISubtitleProvider, IDisposable
     public event Action<string>? SubtitleChanged;
     public event Action<string>? DirectionWordDetected;
 
-    private static readonly string[] DirectionWords = {
-        "东", "南", "西", "北",
-        "东方向", "南方向", "西方向", "北方向",
-        "左上", "右上", "左下", "右下",
-        "左上方", "右上方", "左下方", "右下方",
-        "东方", "南方", "西方", "北方",
-        "前方", "后方", "左边", "右边",
-        "左侧", "右侧", "上面", "下面"
-    };
+    private static readonly string[] s_directionWords = DirectionWords.All;
 
     public DomCcProvider(CoreWebView2 coreWebView)
     {
@@ -66,7 +58,9 @@ public class DomCcProvider : ISubtitleProvider, IDisposable
 
     private void CheckDirectionWords(string text)
     {
-        foreach (var word in DirectionWords)
+        if (string.IsNullOrEmpty(text)) return;
+
+        foreach (var word in s_directionWords)
         {
             if (text.Contains(word))
             {

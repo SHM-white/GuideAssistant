@@ -11,6 +11,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly HotkeyConfigManager _hotkeyConfigManager;
     private bool _isSubtitleEnabled;
     private bool _isMiniMapEnabled;
+    private bool _isMinimapFilterEnabled = true;
     private double _opacity = 0.9;
     private string _opacityLabel = "当前: 90%";
     private string _selectedPage = "hotkeys";
@@ -20,6 +21,7 @@ public partial class SettingsViewModel : ObservableObject
 
     public bool IsSubtitleEnabled { get => _isSubtitleEnabled; set => SetProperty(ref _isSubtitleEnabled, value); }
     public bool IsMiniMapEnabled { get => _isMiniMapEnabled; set => SetProperty(ref _isMiniMapEnabled, value); }
+    public bool IsMinimapFilterEnabled { get => _isMinimapFilterEnabled; set => SetProperty(ref _isMinimapFilterEnabled, value); }
     public double Opacity { get => _opacity; set { if (SetProperty(ref _opacity, value)) OpacityLabel = $"当前: {value * 100:F0}%"; } }
     public string OpacityLabel { get => _opacityLabel; set => SetProperty(ref _opacityLabel, value); }
     public string SelectedPage { get => _selectedPage; set => SetProperty(ref _selectedPage, value); }
@@ -36,11 +38,12 @@ public partial class SettingsViewModel : ObservableObject
     public IRelayCommand<HotkeyRow> StartKeyCaptureCommand { get; }
     public IRelayCommand<HotkeyRow> ClearHotkeyCommand { get; }
 
-    public SettingsViewModel(HotkeyConfigManager hotkeyConfigManager, bool isSubtitleEnabled, bool isMiniMapEnabled, double opacity)
+    public SettingsViewModel(HotkeyConfigManager hotkeyConfigManager, bool isSubtitleEnabled, bool isMiniMapEnabled, bool isMinimapFilterEnabled, double opacity)
     {
         _hotkeyConfigManager = hotkeyConfigManager;
         _isSubtitleEnabled = isSubtitleEnabled;
         _isMiniMapEnabled = isMiniMapEnabled;
+        _isMinimapFilterEnabled = isMinimapFilterEnabled;
         _opacity = opacity;
         _opacityLabel = $"当前: {opacity * 100:F0}%";
 

@@ -26,6 +26,7 @@ public partial class MainViewModel : ObservableObject
     private bool _isLoading;
     private bool _isSubtitleEnabled;
     private bool _isMiniMapEnabled;
+    private bool _isMinimapFilterEnabled = true;
     private bool _isVisible = true;
     private bool _isCurrentUrlBookmarked;
 
@@ -44,6 +45,16 @@ public partial class MainViewModel : ObservableObject
     {
         get => _isMiniMapEnabled;
         set { if (SetProperty(ref _isMiniMapEnabled, value)) WeakReferenceMessenger.Default.Send(new OverlayToggleMessage("minimap", value)); }
+    }
+
+    public bool IsMinimapFilterEnabled
+    {
+        get => _isMinimapFilterEnabled;
+        set
+        {
+            if (SetProperty(ref _isMinimapFilterEnabled, value))
+                _subtitleService.MinimapFilterEnabled = value;
+        }
     }
 
     public bool IsVisible
@@ -165,6 +176,7 @@ public partial class MainViewModel : ObservableObject
             case "bookmark_page": AddBookmark(); break;
             case "toggle_subtitle": IsSubtitleEnabled = !IsSubtitleEnabled; break;
             case "toggle_minimap": IsMiniMapEnabled = !IsMiniMapEnabled; break;
+            case "toggle_minimap_filter": IsMinimapFilterEnabled = !IsMinimapFilterEnabled; break;
             case "opacity_up":
                 Opacity = Math.Min(1.0, Opacity + 0.05);
                 WeakReferenceMessenger.Default.Send(new OpacityChangedMessage(Opacity));
@@ -209,6 +221,7 @@ public partial class MainViewModel : ObservableObject
     public void InitializeSubtitleSync()
     {
         _subtitleService.DirectionWordDetected += OnDirectionWordDetected;
+        _subtitleService.MinimapFilterEnabled = IsMinimapFilterEnabled;
     }
 
     private void OnDirectionWordDetected(string word)

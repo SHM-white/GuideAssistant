@@ -158,6 +158,7 @@ public class HotkeyService : IDisposable
         ("bookmark_page",    "收藏页面",    0xDC),
         ("toggle_subtitle",  "字幕切换",    0x39),
         ("toggle_minimap",   "小地图切换",  0x39),
+        ("toggle_minimap_filter", "小地图过滤", 0x42),
         ("opacity_up",       "提高透明度",  0xBB),
         ("opacity_down",     "降低透明度",  0xBD),
     };

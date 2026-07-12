@@ -13,15 +13,22 @@ public class SubtitleService
     public event Action<string>? SubtitleChanged;
     public event Action<string>? DirectionWordDetected;
 
-    private static readonly string[] DirectionWords = {
-        "东", "南", "西", "北",
-        "东方向", "南方向", "西方向", "北方向",
-        "左上", "右上", "左下", "右下",
-        "左上方", "右上方", "左下方", "右下方",
-        "东方", "南方", "西方", "北方",
-        "前方", "后方", "左边", "右边",
-        "左侧", "右侧", "上面", "下面"
-    };
+    private static readonly string[] s_directionWords = DirectionWords.All;
+    /// <summary>
+    /// Stores the most recent subtitle text from the active provider.
+    /// Marked volatile so that if provider events ever fire on a different
+    /// thread, the cached text read by <see cref="ShouldFireDirection"/>
+    /// is always the latest write from <see cref="OnProviderSubtitleChanged"/>.
+    /// </summary>
+    private volatile string _lastProviderSubtitleText = "";
+
+    /// <summary>
+    /// When ON (default), direction arrows only appear when "小地图" or "地图" is
+    /// mentioned in the same subtitle text, and "大地图" is suppressed.
+    /// When OFF, all direction keywords trigger arrows unconditionally.
+    /// Toggle via settings UI or hotkey (default: B key).
+    /// </summary>
+    public bool MinimapFilterEnabled { get; set; } = true;
 
     public SubtitleService(BilibiliApi bilibiliApi, SpeechRecognitionService speechRecognition)
     {
@@ -123,24 +130,57 @@ public class SubtitleService
 
     private void OnProviderSubtitleChanged(string text)
     {
+        _lastProviderSubtitleText = text;
         SubtitleChanged?.Invoke(text);
     }
 
     private void OnProviderDirectionDetected(string word)
     {
-        DirectionWordDetected?.Invoke(word);
+        if (ShouldFireDirection(word, _lastProviderSubtitleText))
+            DirectionWordDetected?.Invoke(word);
     }
 
     private void CheckDirectionWords(string text)
     {
-        foreach (var word in DirectionWords)
+        if (string.IsNullOrEmpty(text)) return;
+
+        foreach (var word in s_directionWords)
         {
             if (text.Contains(word))
             {
-                DirectionWordDetected?.Invoke(word);
+                if (ShouldFireDirection(word, text))
+                    DirectionWordDetected?.Invoke(word);
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// Returns true if a direction arrow should be shown for <paramref name="fullText"/>.
+    /// Rules (checked in order):
+    ///   1. Null/empty text → suppress (return false).
+    ///   2. Filter ON:
+    ///      a. "大地图" in text → suppress (return false).
+    ///      b. Require "小地图" or "地图" in text.
+    ///      NOTE: We match the broader "地图" (not just "小地图") so that phrases like
+    ///      "地图左下角" (without literal "小地图") still trigger. This is a deliberate
+    ///      pragmatic choice — game guide subtitles often omit "小" before "地图".
+    ///   3. Filter OFF → allow all (including "大地图" text, for user override).
+    /// </summary>
+    private bool ShouldFireDirection(string word, string fullText)
+    {
+        if (string.IsNullOrEmpty(fullText)) return false;
+
+        if (MinimapFilterEnabled)
+        {
+            // Filter ON: suppress 大地图, require 小地图/地图
+            if (fullText.Contains("大地图"))
+                return false;
+            return fullText.Contains("小地图") || fullText.Contains("地图");
+        }
+
+        // Filter OFF: show all direction keywords (user override for 大地图 etc.)
+        return true;
     }
 
     /// <summary>Replace current provider with intercepted subtitle data (fetched from WebView2 fetch interceptor).</summary>
@@ -215,35 +255,9 @@ public class DirectionService
 {
     public static (double angle, string label)? ParseDirection(string text)
     {
-        var dirMap = new Dictionary<string, (double angle, string label)>
-        {
-            { "东", (0, "东") },
-            { "东方向", (0, "东") },
-            { "东方", (0, "东") },
-            { "南", (90, "南") },
-            { "南方向", (90, "南") },
-            { "南方", (90, "南") },
-            { "西", (180, "西") },
-            { "西方向", (180, "西") },
-            { "西方", (180, "西") },
-            { "北", (270, "北") },
-            { "北方向", (270, "北") },
-            { "北方", (270, "北") },
-            { "右上", (315, "↗") },
-            { "右上方", (315, "↗") },
-            { "右下", (45, "↘") },
-            { "右下方", (45, "↘") },
-            { "左上", (225, "↖") },
-            { "左上方", (225, "↖") },
-            { "左下", (135, "↙") },
-            { "左下方", (135, "↙") },
-            { "前方", (270, "↑") },
-            { "后方", (90, "↓") },
-            { "左边", (180, "←") },
-            { "右边", (0, "→") },
-        };
-
-        foreach (var kvp in dirMap)
+        // Use shared AngleMap — longest-keyword-first to ensure compound
+        // terms (西南方向) match before shorter substrings (西).
+        foreach (var kvp in DirectionWords.AngleMap)
         {
             if (text.Contains(kvp.Key))
                 return kvp.Value;

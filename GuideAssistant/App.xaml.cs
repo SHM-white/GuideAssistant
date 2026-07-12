@@ -101,6 +101,7 @@ namespace GuideAssistant
                     sp.GetRequiredService<HotkeyConfigManager>(),
                     mainVm.IsSubtitleEnabled,
                     mainVm.IsMiniMapEnabled,
+                    mainVm.IsMinimapFilterEnabled,
                     mainVm.Opacity);
             });
 
