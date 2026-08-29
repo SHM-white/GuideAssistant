@@ -8,9 +8,9 @@ public class SpeechRecognitionService : IDisposable
 {
     private readonly AudioCaptureService _audioCapture;
     private SpeechRecognitionEngine? _engine;
-    private MemoryStream? _audioStream;
+    private BlockingPcmStream? _audioStream;
     private bool _isRunning;
-    private bool _isRecognizing;
+    private bool _disposed;
     private readonly object _lock = new();
 
     public event Action<string>? SpeechRecognized;
@@ -20,44 +20,43 @@ public class SpeechRecognitionService : IDisposable
         _audioCapture = audioCapture;
     }
 
-    public async Task StartAsync()
+    public async Task<bool> StartAsync()
     {
+        lock (_lock)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(SpeechRecognitionService));
+            if (_isRunning) return true;
+            _isRunning = true;
+        }
+
         var recognizerInfo = SpeechRecognitionEngine.InstalledRecognizers()
             .FirstOrDefault(r => r.Culture.Name.StartsWith("zh"));
 
         if (recognizerInfo == null)
         {
             Log.Warning("No Chinese speech recognizer installed. Speech recognition disabled.");
-            return;
+            lock (_lock) { _isRunning = false; }
+            return false;
         }
 
         _engine = new SpeechRecognitionEngine(recognizerInfo);
         _engine.SpeechRecognized += OnSpeechRecognized;
         _engine.RecognizeCompleted += OnRecognizeCompleted;
 
-        var dictation = new DictationGrammar();
-        _engine.LoadGrammar(dictation);
+        _engine.LoadGrammar(new DictationGrammar());
+
+        _audioStream = new BlockingPcmStream();
+        _engine.SetInputToAudioStream(_audioStream,
+            new SpeechAudioFormatInfo(16000, AudioBitsPerSample.Sixteen, AudioChannel.Mono));
 
         _audioCapture.AudioDataAvailable += OnAudioData;
         await _audioCapture.StartAsync();
 
-        if (_audioCapture.ActiveMode == CaptureMode.WebView2)
+        if (_audioCapture.ActiveMode == CaptureMode.None)
         {
-            _audioStream = new MemoryStream();
-            _engine.SetInputToAudioStream(_audioStream,
-                new SpeechAudioFormatInfo(16000, AudioBitsPerSample.Sixteen, AudioChannel.Mono));
-        }
-        else
-        {
-            try
-            {
-                _engine.SetInputToDefaultAudioDevice();
-            }
-            catch (InvalidOperationException ex)
-            {
-                Log.Warning(ex, "No default audio input device — speech recognition disabled");
-                return;
-            }
+            Log.Warning("Audio capture did not activate. Speech recognition disabled.");
+            await StopAsync();
+            return false;
         }
 
         _engine.InitialSilenceTimeout = TimeSpan.FromSeconds(2);
@@ -65,40 +64,24 @@ public class SpeechRecognitionService : IDisposable
         _engine.EndSilenceTimeout = TimeSpan.FromSeconds(1);
         _engine.EndSilenceTimeoutAmbiguous = TimeSpan.FromSeconds(1.5);
 
-        StartSingleRecognition();
-        _isRunning = true;
+        try
+        {
+            _engine.RecognizeAsync(RecognizeMode.Multiple);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log.Warning(ex, "Speech recognition could not start");
+            await StopAsync();
+            return false;
+        }
+
         Log.Information("SpeechRecognitionService started (culture={Culture})", recognizerInfo.Culture.Name);
+        return true;
     }
 
     private void OnAudioData(byte[] pcmData)
     {
-        if (_audioCapture.ActiveMode != CaptureMode.WebView2) return;
-
-        lock (_lock)
-        {
-            if (_audioStream == null) return;
-            try
-            {
-                long pos = _audioStream.Position;
-                _audioStream.Write(pcmData, 0, pcmData.Length);
-                _audioStream.Position = pos;
-            }
-            catch (ObjectDisposedException) { }
-        }
-    }
-
-    private void StartSingleRecognition()
-    {
-        if (_engine == null || _isRecognizing) return;
-        _isRecognizing = true;
-        try
-        {
-            _engine.RecognizeAsync(RecognizeMode.Single);
-        }
-        catch (InvalidOperationException)
-        {
-            _isRecognizing = false;
-        }
+        _audioStream?.Append(pcmData);
     }
 
     private void OnSpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
@@ -112,42 +95,69 @@ public class SpeechRecognitionService : IDisposable
 
     private void OnRecognizeCompleted(object? sender, RecognizeCompletedEventArgs e)
     {
-        _isRecognizing = false;
-        if (_isRunning && _engine != null)
+        if (e.Error != null)
         {
-            StartSingleRecognition();
+            Log.Error(e.Error, "Speech recognition completed with an error");
+            return;
         }
+
+        Log.Debug("Speech recognition completed (cancelled={Cancelled}, inputEnded={InputEnded})", e.Cancelled, e.InputStreamEnded);
     }
 
     public Task StopAsync()
     {
-        _isRunning = false;
-        _audioCapture.AudioDataAvailable -= OnAudioData;
-        try { _engine?.RecognizeAsyncCancel(); } catch { }
+        SpeechRecognitionEngine? engine;
+        BlockingPcmStream? stream;
 
         lock (_lock)
         {
-            _audioStream?.Dispose();
+            _isRunning = false;
+            engine = _engine;
+            _engine = null;
+            stream = _audioStream;
             _audioStream = null;
         }
+
+        _audioCapture.AudioDataAvailable -= OnAudioData;
+        if (engine != null)
+        {
+            engine.SpeechRecognized -= OnSpeechRecognized;
+            engine.RecognizeCompleted -= OnRecognizeCompleted;
+        }
+
+        try
+        {
+            engine?.RecognizeAsyncCancel();
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log.Debug(ex, "Speech recognition cancel requested after completion");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Speech recognition cancel failed");
+        }
+
+        if (stream != null)
+        {
+            stream.Complete();
+            stream.Dispose();
+        }
+
+        engine?.Dispose();
 
         return _audioCapture.StopAsync();
     }
 
     public void Dispose()
     {
-        _isRunning = false;
-        _audioCapture.AudioDataAvailable -= OnAudioData;
-        try { _engine?.RecognizeAsyncCancel(); } catch { }
-        _engine?.Dispose();
-        _engine = null;
-
         lock (_lock)
         {
-            _audioStream?.Dispose();
-            _audioStream = null;
+            if (_disposed) return;
+            _disposed = true;
         }
 
+        StopAsync().GetAwaiter().GetResult();
         GC.SuppressFinalize(this);
     }
 }

@@ -1,3 +1,4 @@
+using NAudio.Wave;
 using Serilog;
 
 namespace GuideAssistant.Services;
@@ -10,105 +11,197 @@ public interface IAudioCaptureService
     CaptureMode ActiveMode { get; }
 }
 
-public enum CaptureMode { None, WebView2, ProcessLoopback, SystemLoopback }
+public enum CaptureMode { None, WebView2, SystemLoopback }
 
-public class AudioCaptureService : IAudioCaptureService, IDisposable
+public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
 {
+    private const int ProbeTimeoutMilliseconds = 3000;
+    private readonly object _gate = new();
     private CaptureMode _activeMode = CaptureMode.None;
     private bool _isRunning;
-    private CancellationTokenSource? _cts;
-    private Task? _captureTask;
+    private bool _disposed;
+    private TaskCompletionSource<bool>? _probeTcs;
+    private WasapiLoopbackCapture? _loopback;
 
     public event Action<byte[]>? AudioDataAvailable;
-    public CaptureMode ActiveMode => _activeMode;
+    public CaptureMode ActiveMode { get { lock (_gate) return _activeMode; } }
 
     public async Task StartAsync()
     {
-        _cts = new CancellationTokenSource();
-        _isRunning = true;
-
-        var l1Tcs = new TaskCompletionSource<bool>();
-        Action<byte[]>? l1Handler = null;
-        l1Handler = data =>
+        TaskCompletionSource<bool> probe;
+        lock (_gate)
         {
-            l1Tcs.TrySetResult(true);
-        };
-        AudioDataAvailable += l1Handler;
-
-        var completed = await Task.WhenAny(l1Tcs.Task, Task.Delay(3000));
-        AudioDataAvailable -= l1Handler;
-
-        if (completed == l1Tcs.Task && l1Tcs.Task.Result)
-        {
-            _activeMode = CaptureMode.WebView2;
-            Log.Information("AudioCapture: WebView2 mode active");
-            return;
+            if (_disposed) throw new ObjectDisposedException(nameof(AudioCaptureService));
+            if (_isRunning) return;
+            _isRunning = true;
+            _activeMode = CaptureMode.None;
+            _probeTcs = probe = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
         try
         {
-            _activeMode = CaptureMode.ProcessLoopback;
-            Log.Information("AudioCapture: ProcessLoopback mode active (L2)");
-            _captureTask = Task.Run(() => SimulatedLoopbackCapture(_cts.Token));
-            return;
+            var completed = await Task.WhenAny(probe.Task, Task.Delay(ProbeTimeoutMilliseconds)).ConfigureAwait(false);
+            if (completed == probe.Task && probe.Task.Result)
+            {
+                Log.Information("AudioCapture: WebView2 mode active");
+                return;
+            }
+
+            WasapiLoopbackCapture? capture = null;
+            lock (_gate)
+            {
+                if (_isRunning && !_disposed && _activeMode == CaptureMode.None)
+                {
+                    capture = new WasapiLoopbackCapture { WaveFormat = new WaveFormat(16000, 16, 1) };
+                    capture.DataAvailable += OnLoopbackDataAvailable;
+                    capture.RecordingStopped += OnLoopbackRecordingStopped;
+                    _loopback = capture;
+                    _activeMode = CaptureMode.SystemLoopback;
+                }
+            }
+
+            if (capture is not null)
+            {
+                try
+                {
+                    capture.StartRecording();
+                    Log.Information("AudioCapture: SystemLoopback mode active");
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "AudioCapture: failed to initialize or start system loopback recording");
+                    lock (_gate)
+                    {
+                        if (ReferenceEquals(_loopback, capture)) _loopback = null;
+                        if (_activeMode == CaptureMode.SystemLoopback) _activeMode = CaptureMode.None;
+                    }
+
+                    StopAndDisposeLoopback(capture);
+                }
+            }
         }
-        catch { }
-
-        _activeMode = CaptureMode.SystemLoopback;
-        Log.Information("AudioCapture: SystemLoopback mode active (L3)");
-        _captureTask = Task.Run(() => SystemLoopbackCapture(_cts.Token));
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_probeTcs, probe)) _probeTcs = null;
+            }
+        }
     }
 
-    public Task StopAsync()
-    {
-        _isRunning = false;
-        _cts?.Cancel();
-        _activeMode = CaptureMode.None;
-        return Task.CompletedTask;
-    }
+    public Task StopAsync() { StopCore(); return Task.CompletedTask; }
 
     public void OnWebView2AudioReceived(byte[] pcmData)
     {
-        if (_activeMode == CaptureMode.WebView2 && _isRunning)
+        if (pcmData.Length == 0) return;
+
+        byte[]? payload = null;
+        TaskCompletionSource<bool>? probe = null;
+        WasapiLoopbackCapture? loopbackToStop = null;
+
+        lock (_gate)
         {
-            AudioDataAvailable?.Invoke(pcmData);
+            if (!_isRunning || _disposed) return;
+
+            switch (_activeMode)
+            {
+                case CaptureMode.None:
+                    _activeMode = CaptureMode.WebView2;
+                    probe = _probeTcs;
+                    break;
+                case CaptureMode.SystemLoopback:
+                    _activeMode = CaptureMode.WebView2;
+                    loopbackToStop = _loopback;
+                    _loopback = null;
+                    break;
+                case CaptureMode.WebView2:
+                    break;
+            }
+
+            payload = new byte[pcmData.Length];
+            Buffer.BlockCopy(pcmData, 0, payload, 0, pcmData.Length);
+        }
+
+        probe?.TrySetResult(true);
+        if (loopbackToStop is not null)
+        {
+            StopAndDisposeLoopback(loopbackToStop);
+            Log.Information("AudioCapture: switched from system loopback to WebView2");
+        }
+
+        if (payload is not null)
+        {
+            AudioDataAvailable?.Invoke(payload);
         }
     }
 
-    private async Task SimulatedLoopbackCapture(CancellationToken ct)
+    private void OnLoopbackDataAvailable(object? sender, WaveInEventArgs e)
     {
-        while (!ct.IsCancellationRequested && _isRunning)
+        byte[]? payload = null;
+        lock (_gate)
         {
-            await Task.Delay(100, ct);
+            if (!_isRunning || _disposed || _activeMode != CaptureMode.SystemLoopback || !ReferenceEquals(sender, _loopback) || e.BytesRecorded == 0)
+            {
+                return;
+            }
+
+            payload = new byte[e.BytesRecorded];
+            Buffer.BlockCopy(e.Buffer, 0, payload, 0, e.BytesRecorded);
+        }
+
+        if (payload is not null)
+        {
+            AudioDataAvailable?.Invoke(payload);
         }
     }
 
-    private async Task SystemLoopbackCapture(CancellationToken ct)
+    private void OnLoopbackRecordingStopped(object? sender, StoppedEventArgs e)
     {
-        while (!ct.IsCancellationRequested && _isRunning)
+        if (e.Exception is not null) Log.Error(e.Exception, "AudioCapture: system loopback recording stopped with an error");
+        lock (_gate)
         {
-            await Task.Delay(100, ct);
+            if (ReferenceEquals(sender, _loopback)) _loopback = null;
+            if (_activeMode == CaptureMode.SystemLoopback) _activeMode = CaptureMode.None;
         }
-    }
-
-    public static bool IsVoiceActive(byte[] pcmBuffer, double threshold = 500.0)
-    {
-        if (pcmBuffer.Length < 2) return false;
-        double sum = 0;
-        for (int i = 0; i < pcmBuffer.Length - 1; i += 2)
-        {
-            short sample = BitConverter.ToInt16(pcmBuffer, i);
-            sum += sample * sample;
-        }
-        double rms = Math.Sqrt(sum / (pcmBuffer.Length / 2));
-        return rms > threshold;
     }
 
     public void Dispose()
     {
-        _cts?.Cancel();
-        _cts?.Dispose();
-        _isRunning = false;
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
+
+        StopCore();
         GC.SuppressFinalize(this);
+    }
+
+    private void StopCore()
+    {
+        WasapiLoopbackCapture? loopback;
+        TaskCompletionSource<bool>? probe;
+
+        lock (_gate)
+        {
+            _isRunning = false;
+            _activeMode = CaptureMode.None;
+            loopback = _loopback;
+            _loopback = null;
+            probe = _probeTcs;
+            _probeTcs = null;
+        }
+
+        probe?.TrySetResult(false);
+        if (loopback is not null) StopAndDisposeLoopback(loopback);
+    }
+
+    private static void StopAndDisposeLoopback(WasapiLoopbackCapture capture)
+    {
+        try { capture.StopRecording(); }
+        catch (Exception ex) { Log.Debug(ex, "AudioCapture: system loopback stop failed"); }
+
+        try { capture.Dispose(); }
+        catch (Exception ex) { Log.Debug(ex, "AudioCapture: system loopback dispose failed"); }
     }
 }

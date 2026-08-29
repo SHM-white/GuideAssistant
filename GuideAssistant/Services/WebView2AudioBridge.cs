@@ -18,7 +18,6 @@ public class WebView2AudioBridge : IDisposable
     public async Task InitializeAsync()
     {
         if (_initialized) return;
-        _initialized = true;
 
         var scriptPath = System.IO.Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, "Guides", "audio-capture.js");
@@ -33,10 +32,19 @@ public class WebView2AudioBridge : IDisposable
             script = GetEmbeddedAudioCaptureScript();
         }
 
-        await _coreWebView.AddScriptToExecuteOnDocumentCreatedAsync(script);
-
         _coreWebView.WebMessageReceived += OnWebMessageReceived;
-        Log.Information("WebView2AudioBridge initialized");
+        try
+        {
+            await _coreWebView.AddScriptToExecuteOnDocumentCreatedAsync(script);
+            await _coreWebView.ExecuteScriptAsync(script);
+            _initialized = true;
+            Log.Information("WebView2AudioBridge initialized");
+        }
+        catch
+        {
+            _coreWebView.WebMessageReceived -= OnWebMessageReceived;
+            throw;
+        }
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)

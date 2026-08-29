@@ -88,7 +88,11 @@ public class BilibiliCcProvider : ISubtitleProvider, IDisposable
         }
         else
         {
-            _lastContent = null;
+            if (_lastContent != null)
+            {
+                _lastContent = null;
+                SubtitleChanged?.Invoke(string.Empty);
+            }
         }
     }
 

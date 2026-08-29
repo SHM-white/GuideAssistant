@@ -34,10 +34,12 @@ public sealed partial class MainWindow : Window
     private readonly BilibiliApi _bilibiliApi;
     private ToolbarViewModel? _toolbarVM;
     private WebView2AudioBridge? _audioBridge;
+    private Microsoft.Web.WebView2.Core.CoreWebView2? _webMessageCoreWebView;
     private SettingsWindow? _settingsWindow;
     private TaskbarIcon? _trayIcon;
     private IntPtr _hwnd;
     private System.Timers.Timer? _subtitleTimeSyncTimer;
+    private int _bilibiliNavigationVersion;
 
     public MainViewModel ViewModel => _viewModel;
 
@@ -153,6 +155,7 @@ public sealed partial class MainWindow : Window
         WebViewControl.TitleChanged += title => _viewModel.CurrentTitle = title;
         WebViewControl.UrlChanged += url =>
         {
+            var navigationVersion = System.Threading.Interlocked.Increment(ref _bilibiliNavigationVersion);
             _viewModel.CurrentUrl = url;
             _viewModel.UpdateBookmarkState(url);
 
@@ -161,48 +164,7 @@ public sealed partial class MainWindow : Window
 
             if (url.Contains("bilibili.com/video/"))
             {
-                var bvid = BilibiliApi.ExtractBvid(url);
-                Log.Information("MainWindow: B站 video detected, url={Url} bvid={Bvid}", url, bvid);
-
-                _subtitleService.SetCoreWebView(WebViewControl.CurrentCoreWebView2);
-                _ = _subtitleService.LoadSubtitle(url);
-
-                _audioBridge?.Dispose();
-                _audioBridge = null;
-                var wv = WebViewControl.CurrentCoreWebView2;
-                if (wv != null)
-                {
-                    _audioBridge = new WebView2AudioBridge(wv, _audioCapture);
-                    _ = _audioBridge.InitializeAsync();
-
-                    // Extract B站 cookies for API authentication
-                    _ = ExtractBilibiliCookiesAsync(wv);
-
-                    // Listen for debug and subtitle-intercept messages from injected JS
-                    wv.WebMessageReceived += (s, msg) =>
-                    {
-                        var txt = msg.TryGetWebMessageAsString();
-                        if (string.IsNullOrEmpty(txt)) return;
-                        if (txt.StartsWith("__gv_debug:"))
-                        {
-                            Log.Information("[WebView] {Msg}", txt);
-                        }
-                        else if (txt.StartsWith("__gv_subtitle_json:"))
-                        {
-                            // Format: __gv_subtitle_json:bvid:json_body
-                            var payload = txt["__gv_subtitle_json:".Length..];
-                            var sep = payload.IndexOf(':');
-                            if (sep > 0)
-                            {
-                                var bvid = payload[..sep];
-                                var json = payload[(sep + 1)..];
-                                BilibiliApi.CacheInterceptedSubtitle(bvid, json);
-                                // Replace provider data with intercepted (accurate) subtitle
-                                _ = _subtitleService.ReplaceWithInterceptedAsync(bvid, json);
-                            }
-                        }
-                    };
-                }
+                _ = HandleBilibiliVideoNavigationAsync(url, navigationVersion);
             }
         };
         WebViewControl.LoadingStateChanged += isLoading => _viewModel.IsLoading = isLoading;
@@ -215,6 +177,86 @@ public sealed partial class MainWindow : Window
     }
 
     private void LoadTab(TabItem tab) => WebViewControl.LoadUrl(tab, tab.Url);
+
+    private async Task HandleBilibiliVideoNavigationAsync(string url, int navigationVersion)
+    {
+        var bvid = BilibiliApi.ExtractBvid(url);
+        Log.Information("MainWindow: B站 video detected, url={Url} bvid={Bvid}", url, bvid);
+
+        var wv = WebViewControl.CurrentCoreWebView2;
+        _audioBridge?.Dispose();
+        _audioBridge = null;
+
+        if (wv != null)
+        {
+            var bridge = new WebView2AudioBridge(wv, _audioCapture);
+            _audioBridge = bridge;
+
+            try
+            {
+                await bridge.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "MainWindow: WebView2 audio bridge initialization failed");
+            }
+
+            if (navigationVersion != System.Threading.Volatile.Read(ref _bilibiliNavigationVersion) || !ReferenceEquals(_audioBridge, bridge) || !ReferenceEquals(WebViewControl.CurrentCoreWebView2, wv))
+            {
+                bridge.Dispose();
+                return;
+            }
+
+            // Extract B站 cookies for API authentication
+            _ = ExtractBilibiliCookiesAsync(wv);
+
+            AttachWebMessageHandler(wv);
+        }
+
+        if (navigationVersion != System.Threading.Volatile.Read(ref _bilibiliNavigationVersion))
+        {
+            return;
+        }
+
+        _subtitleService.SetCoreWebView(wv);
+        await _subtitleService.LoadSubtitle(url);
+    }
+
+    private void AttachWebMessageHandler(Microsoft.Web.WebView2.Core.CoreWebView2 wv)
+    {
+        if (_webMessageCoreWebView != null)
+        {
+            _webMessageCoreWebView.WebMessageReceived -= OnWebMessageReceived;
+        }
+
+        wv.WebMessageReceived -= OnWebMessageReceived;
+        wv.WebMessageReceived += OnWebMessageReceived;
+        _webMessageCoreWebView = wv;
+    }
+
+    private void OnWebMessageReceived(object? sender, Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs msg)
+    {
+        var txt = msg.TryGetWebMessageAsString();
+        if (string.IsNullOrEmpty(txt)) return;
+        if (txt.StartsWith("__gv_debug:"))
+        {
+            Log.Information("[WebView] {Msg}", txt);
+        }
+        else if (txt.StartsWith("__gv_subtitle_json:"))
+        {
+            // Format: __gv_subtitle_json:bvid:json_body
+            var payload = txt["__gv_subtitle_json:".Length..];
+            var sep = payload.IndexOf(':');
+            if (sep > 0)
+            {
+                var bvid = payload[..sep];
+                var json = payload[(sep + 1)..];
+                BilibiliApi.CacheInterceptedSubtitle(bvid, json);
+                // Replace provider data with intercepted (accurate) subtitle
+                _ = _subtitleService.ReplaceWithInterceptedAsync(bvid, json);
+            }
+        }
+    }
 
     // ── Messenger Handlers ──────────────────────────────
 
@@ -354,7 +396,7 @@ public sealed partial class MainWindow : Window
                             _subtitleService.UpdateTime(current.GetDouble());
                     }
                 }
-                catch { }
+                catch (Exception ex) { Log.Debug(ex, "Subtitle sync tick failed"); }
             });
         };
         _subtitleTimeSyncTimer.Start();
