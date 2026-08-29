@@ -1,0 +1,341 @@
+name: Release MSIX
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing vMAJOR.MINOR.PATCH tag to release'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.architecture }} MSIX
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86
+            runtimeIdentifier: win-x86
+            appxBundlePlatform: x86
+          - architecture: x64
+            runtimeIdentifier: win-x64
+            appxBundlePlatform: x64
+          - architecture: ARM64
+            runtimeIdentifier: win-arm64
+            appxBundlePlatform: arm64
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Verify tag and derive MSIX version
+        shell: pwsh
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $tag = $env:REQUESTED_TAG.Trim()
+          if ($tag -match '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            $major = [int]$Matches[1]
+            $minor = [int]$Matches[2]
+            $patch = [int]$Matches[3]
+          } else {
+            throw "Tag '$tag' must strictly match vMAJOR.MINOR.PATCH."
+          }
+
+          foreach ($component in @($major, $minor, $patch)) {
+            if ($component -gt 65535) {
+              throw "MSIX version component '$component' exceeds 65535."
+            }
+          }
+
+          git fetch --force --tags origin
+          $null = git rev-parse --verify --quiet "refs/tags/$tag^{commit}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tag '$tag' does not exist in this repository."
+          }
+
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MSIX_VERSION=$major.$minor.$patch.0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Rewrite runner manifest version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $projectDir = Join-Path $env:GITHUB_WORKSPACE 'GuideAssistant'
+          $manifests = @(Get-ChildItem -Path $projectDir -Filter '*.appxmanifest' -Recurse -File)
+          if ($manifests.Count -ne 1) {
+            throw "Expected exactly one appxmanifest under '$projectDir', found $($manifests.Count)."
+          }
+
+          $manifestPath = $manifests[0].FullName
+          [xml]$manifest = Get-Content -LiteralPath $manifestPath
+          $identity = $manifest.Package.Identity
+          if ($null -eq $identity) {
+            throw "Manifest '$manifestPath' does not contain Package/Identity."
+          }
+
+          $publisher = [string]$identity.Publisher
+          if ([string]::IsNullOrWhiteSpace($publisher)) {
+            throw "Manifest '$manifestPath' does not declare an Identity Publisher."
+          }
+
+          $identity.Version = $env:MSIX_VERSION
+          $manifest.Save($manifestPath)
+
+          "MANIFEST_PATH=$manifestPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MANIFEST_PUBLISHER=$publisher" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Import signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64)) {
+            throw 'WINDOWS_CERTIFICATE_BASE64 secret is required.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw 'WINDOWS_CERTIFICATE_PASSWORD secret is required.'
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'windows-signing-certificate.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $importedCertificates = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password -Exportable)
+          $signingCertificate = $importedCertificates |
+            Where-Object { $_.HasPrivateKey -and $_.Subject -eq $env:MANIFEST_PUBLISHER } |
+            Select-Object -First 1
+
+          if ($null -eq $signingCertificate) {
+            throw "PFX must contain a private-key certificate whose Subject exactly matches manifest Publisher '$env:MANIFEST_PUBLISHER'."
+          }
+          if (-not $signingCertificate.HasPrivateKey) {
+            throw 'Imported signing certificate does not have a private key.'
+          }
+          if ($signingCertificate.Subject -ne $env:MANIFEST_PUBLISHER) {
+            throw "Certificate Subject '$($signingCertificate.Subject)' does not exactly match manifest Publisher '$env:MANIFEST_PUBLISHER'."
+          }
+
+          "CERT_THUMBPRINT=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CERT_THUMBPRINT_TO_CLEAN=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PFX_PATH=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Resolve MSBuild
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere)) {
+            throw "vswhere was not found at '$vswhere'."
+          }
+
+          $msbuildPath = & $vswhere -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($msbuildPath) -or -not (Test-Path -LiteralPath $msbuildPath)) {
+            throw 'MSBuild could not be resolved with vswhere.'
+          }
+
+          "MSBUILD_PATH=$msbuildPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build signed side-load package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $projectPath = Join-Path $env:GITHUB_WORKSPACE 'GuideAssistant\GuideAssistant.csproj'
+          $packageRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\msix\${{ matrix.architecture }}'
+          New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
+
+          & $env:MSBUILD_PATH $projectPath `
+            /restore `
+            /m `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.architecture }} `
+            /p:RuntimeIdentifier=${{ matrix.runtimeIdentifier }} `
+            /p:PublishProfile= `
+            /p:AppxBundle=Never `
+            /p:AppxBundlePlatforms=${{ matrix.appxBundlePlatform }} `
+            /p:UapAppxPackageBuildMode=SideloadOnly `
+            /p:GenerateAppxPackageOnBuild=true `
+            /p:AppxPackageSigningEnabled=true `
+            /p:PackageCertificateThumbprint=$env:CERT_THUMBPRINT `
+            /p:AppxPackageVersion=$env:MSIX_VERSION `
+            /p:AppxPackageDir="$packageRoot\"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSBuild failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Verify package and create ZIP asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $packageRoot = Join-Path $env:GITHUB_WORKSPACE 'artifacts\msix\${{ matrix.architecture }}'
+          $sideLoadDirs = @(Get-ChildItem -Path $packageRoot -Directory -Recurse | Where-Object {
+            Test-Path -LiteralPath (Join-Path $_.FullName 'Add-AppDevPackage.ps1')
+          })
+          if ($sideLoadDirs.Count -ne 1) {
+            throw "Expected exactly one side-load directory with Add-AppDevPackage.ps1 under '$packageRoot', found $($sideLoadDirs.Count)."
+          }
+
+          $sideLoadDir = $sideLoadDirs[0]
+          $msixPackages = @(Get-ChildItem -Path $sideLoadDir.FullName -Filter '*.msix' -File -Recurse)
+          if ($msixPackages.Count -ne 1) {
+            throw "Expected exactly one .msix under '$($sideLoadDir.FullName)', found $($msixPackages.Count)."
+          }
+
+          $signTools = @(Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter 'signtool.exe' -Recurse -File |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object @{ Expression = { [version]$_.Directory.Parent.Name }; Descending = $true })
+          if ($signTools.Count -eq 0) {
+            throw 'Latest x64 signtool.exe could not be found in the Windows 10 SDK.'
+          }
+
+          $signtoolPath = $signTools[0].FullName
+          & $signtoolPath verify /pa /all /v $msixPackages[0].FullName
+          if ($LASTEXITCODE -ne 0) {
+            throw "signtool signature verification failed with exit code $LASTEXITCODE."
+          }
+
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts\release'
+          New-Item -ItemType Directory -Path $assetDir -Force | Out-Null
+          $zipPath = Join-Path $assetDir "GuideAssistant-$env:RELEASE_TAG-${{ matrix.architecture }}.zip"
+          if (Test-Path -LiteralPath $zipPath) {
+            Remove-Item -LiteralPath $zipPath -Force
+          }
+          Compress-Archive -Path $sideLoadDir.FullName -DestinationPath $zipPath -CompressionLevel Optimal
+
+      - name: Upload ${{ matrix.architecture }} ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-${{ matrix.architecture }}
+          path: artifacts/release/*.zip
+          if-no-files-found: error
+
+      - name: Clean signing certificate and PFX
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+
+          if (-not [string]::IsNullOrWhiteSpace($env:CERT_THUMBPRINT_TO_CLEAN)) {
+            $certPath = "Cert:\CurrentUser\My\$env:CERT_THUMBPRINT_TO_CLEAN"
+            if (Test-Path -LiteralPath $certPath) {
+              try {
+                Remove-Item -LiteralPath $certPath -DeleteKey -Force
+              } catch {
+                Remove-Item -LiteralPath $certPath -Force
+              }
+            }
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($env:PFX_PATH) -and (Test-Path -LiteralPath $env:PFX_PATH)) {
+            Remove-Item -LiteralPath $env:PFX_PATH -Force
+          }
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve and validate release tag
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          tag="${REQUESTED_TAG}"
+          if [[ "${tag}" =~ ^v(0|[1-9][0-9]*)\.([0-9]|[1-9][0-9]*)\.([0-9]|[1-9][0-9]*)$ ]]; then
+            major="${BASH_REMATCH[1]}"
+            minor="${BASH_REMATCH[2]}"
+            patch="${BASH_REMATCH[3]}"
+          else
+            echo "Tag '${tag}' must strictly match vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          fi
+
+          for component in "${major}" "${minor}" "${patch}"; do
+            if (( component > 65535 )); then
+              echo "MSIX version component '${component}' exceeds 65535." >&2
+              exit 1
+            fi
+          done
+
+          echo "RELEASE_TAG=${tag}" >> "${GITHUB_ENV}"
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: msix-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Require exactly expected ZIP assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected=(
+            "GuideAssistant-${RELEASE_TAG}-x86.zip"
+            "GuideAssistant-${RELEASE_TAG}-x64.zip"
+            "GuideAssistant-${RELEASE_TAG}-ARM64.zip"
+          )
+
+          mapfile -t actual < <(find release-assets -maxdepth 1 -type f -name '*.zip' -printf '%f\n' | sort)
+          if [[ "${#actual[@]}" -ne 3 ]]; then
+            printf 'Expected exactly 3 ZIP assets, found %s:\n' "${#actual[@]}" >&2
+            printf '  %s\n' "${actual[@]}" >&2
+            exit 1
+          fi
+
+          for expected_name in "${expected[@]}"; do
+            if [[ ! -f "release-assets/${expected_name}" ]]; then
+              echo "Missing expected asset '${expected_name}'." >&2
+              exit 1
+            fi
+          done
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Reusing existing release ${RELEASE_TAG}."
+          else
+            gh release create "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes
+          fi
+
+          gh release upload "${RELEASE_TAG}" \
+            "release-assets/GuideAssistant-${RELEASE_TAG}-x86.zip" \
+            "release-assets/GuideAssistant-${RELEASE_TAG}-x64.zip" \
+            "release-assets/GuideAssistant-${RELEASE_TAG}-ARM64.zip" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
