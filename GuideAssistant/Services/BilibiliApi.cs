@@ -47,7 +47,10 @@ public class BilibiliApi
                     Content = item.GetProperty("content").GetString() ?? ""
                 });
             }
-            InterceptedCache[bvid] = new SubtitleData { Items = items };
+            lock (InterceptedCache)
+            {
+                InterceptedCache[bvid] = new SubtitleData { Items = items };
+            }
             Log.Information("BilibiliApi: intercepted subtitle cached for bvid={Bvid}, {Count} items", bvid, items.Count);
         }
         catch (Exception ex)

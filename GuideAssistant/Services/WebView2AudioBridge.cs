@@ -80,6 +80,11 @@ public class WebView2AudioBridge : IDisposable
       var processor = ctx.createScriptProcessor(4096, 1, 1);
 
       source.connect(processor);
+    // ScriptProcessor requires an output connection; keep it inaudible.
+    var silent = ctx.createGain();
+    silent.gain.value = 0;
+    processor.connect(silent);
+    silent.connect(ctx.destination);
       processor.connect(ctx.destination);
 
       processor.onaudioprocess = function(e) {

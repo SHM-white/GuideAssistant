@@ -25,6 +25,7 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
           HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 != '' }}
           HAS_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD != '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -33,6 +34,11 @@ jobs:
           fi
           if [[ "$HAS_CERTIFICATE" != 'true' || "$HAS_PASSWORD" != 'true' ]]; then
             echo '::error::Missing WINDOWS_CERTIFICATE_BASE64 or WINDOWS_CERTIFICATE_PASSWORD. See RELEASE.md.'
+            exit 1
+          fi
+          # Avoid starting three Windows jobs for an absent release tag.
+          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "::error::Release tag '${RELEASE_TAG}' does not exist."
             exit 1
           fi
 

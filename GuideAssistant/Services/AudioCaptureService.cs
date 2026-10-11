@@ -22,6 +22,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
     private bool _disposed;
     private TaskCompletionSource<bool>? _probeTcs;
     private WasapiLoopbackCapture? _loopback;
+    private LoopbackPcmConverter? _converter;
 
     public event Action<byte[]>? AudioDataAvailable;
     public CaptureMode ActiveMode { get { lock (_gate) return _activeMode; } }
@@ -52,11 +53,23 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
             {
                 if (_isRunning && !_disposed && _activeMode == CaptureMode.None)
                 {
-                    capture = new WasapiLoopbackCapture { WaveFormat = new WaveFormat(16000, 16, 1) };
-                    capture.DataAvailable += OnLoopbackDataAvailable;
-                    capture.RecordingStopped += OnLoopbackRecordingStopped;
-                    _loopback = capture;
-                    _activeMode = CaptureMode.SystemLoopback;
+                    try
+                    {
+                        // WASAPI provides the device's actual mix format (often float/stereo/48k).
+                        capture = new WasapiLoopbackCapture();
+                        _converter = new LoopbackPcmConverter(capture.WaveFormat);
+                        capture.DataAvailable += OnLoopbackDataAvailable;
+                        capture.RecordingStopped += OnLoopbackRecordingStopped;
+                        _loopback = capture;
+                        _activeMode = CaptureMode.SystemLoopback;
+                    }
+                    catch (Exception ex)
+                    {
+                        capture?.Dispose();
+                        capture = null;
+                        _converter = null;
+                        Log.Warning(ex, "AudioCapture: system loopback is unsupported");
+                    }
                 }
             }
 
@@ -72,7 +85,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
                     Log.Error(ex, "AudioCapture: failed to initialize or start system loopback recording");
                     lock (_gate)
                     {
-                        if (ReferenceEquals(_loopback, capture)) _loopback = null;
+                        if (ReferenceEquals(_loopback, capture)) { _loopback = null; _converter = null; }
                         if (_activeMode == CaptureMode.SystemLoopback) _activeMode = CaptureMode.None;
                     }
 
@@ -113,6 +126,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
                     _activeMode = CaptureMode.WebView2;
                     loopbackToStop = _loopback;
                     _loopback = null;
+                    _converter = null;
                     break;
                 case CaptureMode.WebView2:
                     break;
@@ -145,8 +159,15 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
                 return;
             }
 
-            payload = new byte[e.BytesRecorded];
-            Buffer.BlockCopy(e.Buffer, 0, payload, 0, e.BytesRecorded);
+            try
+            {
+                payload = _converter?.Convert(e.Buffer, e.BytesRecorded);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "AudioCapture: failed to convert device mix format");
+                return;
+            }
         }
 
         if (payload is not null)
@@ -160,7 +181,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
         if (e.Exception is not null) Log.Error(e.Exception, "AudioCapture: system loopback recording stopped with an error");
         lock (_gate)
         {
-            if (ReferenceEquals(sender, _loopback)) _loopback = null;
+            if (ReferenceEquals(sender, _loopback)) { _loopback = null; _converter = null; }
             if (_activeMode == CaptureMode.SystemLoopback) _activeMode = CaptureMode.None;
         }
     }
@@ -188,6 +209,7 @@ public sealed class AudioCaptureService : IAudioCaptureService, IDisposable
             _activeMode = CaptureMode.None;
             loopback = _loopback;
             _loopback = null;
+            _converter = null;
             probe = _probeTcs;
             _probeTcs = null;
         }

@@ -39,7 +39,6 @@ public sealed partial class WebViewContainer : UserControl
 
         try
         {
-            var isNew = !_tabManager.HasWebView(tab.Id);
             var wv = _tabManager.GetOrCreateWebView(tab, t =>
             {
                 var webView2 = new Microsoft.UI.Xaml.Controls.WebView2();
@@ -67,12 +66,8 @@ public sealed partial class WebViewContainer : UserControl
             wv.Visibility = Visibility.Visible;
             _webView = wv;
 
-            // Navigate if CoreWebView2 is already ready and we're loading a different URL
-            if (wv.CoreWebView2 != null && isNew)
-            {
-                wv.CoreWebView2.Navigate(url);
-            }
-            else if (wv.CoreWebView2 == null)
+            // Initial navigation is handled by EnsureCoreWebView2Async completion.
+            if (wv.CoreWebView2 == null)
             {
                 // CoreWebView2 not ready yet; update tab URL so completion handler uses it
                 tab.Url = url;

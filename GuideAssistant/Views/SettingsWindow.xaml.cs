@@ -31,8 +31,7 @@ public sealed partial class SettingsWindow : Window
         // Safety: ensure SuppressAll is cleared when window closes
         Closed += (s, e) =>
         {
-            if (_viewModel.IsCapturingKey)
-                _viewModel.CancelKeyCapture();
+            _viewModel.Dispose();
         };
     }
 
