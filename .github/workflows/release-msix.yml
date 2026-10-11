@@ -194,6 +194,7 @@ jobs:
             $cerPath = Join-Path $env:RUNNER_TEMP 'windows-signing-certificate.cer'
             Export-Certificate -Cert $signingCertificate -FilePath $cerPath | Out-Null
             Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+            Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
             "CERT_TRUST_THUMBPRINT_TO_CLEAN=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             "CER_PATH=$cerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
@@ -327,6 +328,10 @@ jobs:
             $trustedCertPath = "Cert:\CurrentUser\TrustedPeople\$env:CERT_TRUST_THUMBPRINT_TO_CLEAN"
             if (Test-Path -LiteralPath $trustedCertPath) {
               Remove-Item -LiteralPath $trustedCertPath -Force
+            }
+            $trustedRootCertPath = "Cert:\CurrentUser\Root\$env:CERT_TRUST_THUMBPRINT_TO_CLEAN"
+            if (Test-Path -LiteralPath $trustedRootCertPath) {
+              Remove-Item -LiteralPath $trustedRootCertPath -Force
             }
           }
           if (-not [string]::IsNullOrWhiteSpace($env:CER_PATH) -and (Test-Path -LiteralPath $env:CER_PATH)) {
