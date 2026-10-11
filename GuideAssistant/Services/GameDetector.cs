@@ -15,6 +15,7 @@ public class GameDetector : IDisposable
     private HashSet<string> _activeGames = new();
     private List<GameConfig> _configs = new();
     private bool _isRunning;
+    private int _checking;
 
     /// <summary>
     /// Gets the game name currently in the foreground, or null if no tracked game is active.
@@ -44,6 +45,9 @@ public class GameDetector : IDisposable
         _isRunning = false;
         _timer?.Dispose();
         _timer = null;
+        _launcher.StopAll();
+        _activeGames.Clear();
+        CurrentForegroundGameName = null;
     }
 
     public void ReloadConfigs()
@@ -53,48 +57,60 @@ public class GameDetector : IDisposable
 
     private void CheckForeground(object? state)
     {
+        if (!_isRunning || Interlocked.Exchange(ref _checking, 1) != 0) return;
         try
         {
+            // Loss of foreground focus is NOT a game exit.
             var hwnd = GetForegroundWindow();
-            if (hwnd == IntPtr.Zero) return;
-
-            GetWindowThreadProcessId(hwnd, out uint pid);
-            var processName = GetProcessName((int)pid);
-
-            if (string.IsNullOrEmpty(processName)) return;
+            uint foregroundPid = 0;
+            if (hwnd != IntPtr.Zero) GetWindowThreadProcessId(hwnd, out foregroundPid);
+            var foregroundProcess = foregroundPid == 0 ? "" : GetProcessName((int)foregroundPid);
+            string? focusedGame = null;
 
             foreach (var config in _configs)
             {
                 if (!config.AutoDetect) continue;
-                var gameExe = System.IO.Path.GetFileNameWithoutExtension(config.GamePath);
-                var isRunning = string.Equals(processName, gameExe, StringComparison.OrdinalIgnoreCase);
+                var executable = System.IO.Path.GetFileNameWithoutExtension(config.GamePath);
+                if (string.IsNullOrWhiteSpace(executable)) continue;
 
-                if (isRunning && !_activeGames.Contains(config.GameName))
+                bool running;
+                try
                 {
-                    _activeGames.Add(config.GameName);
-                    CurrentForegroundGameName = config.GameName;
+                    var processes = Process.GetProcessesByName(executable);
+                    running = processes.Length > 0;
+                    foreach (var process in processes) process.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Game process query failed for {Exe}", executable);
+                    continue;
+                }
+
+                if (running && _activeGames.Add(config.GameName))
+                {
                     _launcher.LaunchHelper(config);
                     GameStateChanged?.Invoke(config, true);
-                    Log.Information("Game detected: {Game}", config.GameName);
+                    Log.Information("Game process started: {Game}", config.GameName);
                 }
-                else if (!isRunning && _activeGames.Contains(config.GameName))
+                else if (!running && _activeGames.Remove(config.GameName))
                 {
-                    _activeGames.Remove(config.GameName);
-                    if (CurrentForegroundGameName == config.GameName)
-                        CurrentForegroundGameName = null;
                     _launcher.StopHelper(config);
                     GameStateChanged?.Invoke(config, false);
-                    Log.Information("Game stopped: {Game}", config.GameName);
+                    Log.Information("Game process exited: {Game}", config.GameName);
                 }
-                else if (isRunning)
-                {
-                    CurrentForegroundGameName = config.GameName;
-                }
+
+                if (running && string.Equals(foregroundProcess, executable, StringComparison.OrdinalIgnoreCase))
+                    focusedGame = config.GameName;
             }
+            CurrentForegroundGameName = focusedGame;
         }
         catch (Exception ex)
         {
             Log.Error(ex, "GameDetector check failed");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _checking, 0);
         }
     }
 

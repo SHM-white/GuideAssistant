@@ -87,8 +87,11 @@ public class HotkeyConfigManager
     public void ClearBinding(string actionName)
     {
         if (_defaultProfileId == 0) EnsureDefaultProfile();
-        _repo.ClearBinding(_defaultProfileId, actionName);
-        Log.Information("Hotkey cleared via ConfigManager: {Action}", actionName);
+        // An explicit unbound binding must not fall back to the default.
+        var def = HotkeyService.KnownActions.FirstOrDefault(a => a.ActionName == actionName);
+        if (def.ActionName == null) return;
+        _repo.SaveBinding(_defaultProfileId, actionName, def.DisplayName, 0, "未绑定");
+        Log.Information("Hotkey disabled via ConfigManager: {Action}", actionName);
         RefreshAndNotify();
     }
 
@@ -129,13 +132,7 @@ public class HotkeyConfigManager
                 });
                 needsSave = true;
             }
-            else if (binding.VirtualKey == 0)
-            {
-                binding.VirtualKey = known.DefaultVk;
-                binding.DisplayText = HotkeyService.VirtualKeyToDisplayName(known.DefaultVk);
-                binding.ActionDisplay = known.DisplayName;
-                needsSave = true;
-            }
+            // VirtualKey == 0 explicitly disables a binding.
         }
 
         if (needsSave)
@@ -153,7 +150,7 @@ public class HotkeyConfigManager
     {
         var profile = _repo.GetDefaultProfile();
         var dbBindings = profile?.Bindings
-            ?.Where(b => b.VirtualKey != 0)
+            ?.Where(b => !string.IsNullOrEmpty(b.ActionName))
             .ToDictionary(b => b.ActionName)
             ?? new Dictionary<string, HotkeyBinding>(StringComparer.Ordinal);
 
