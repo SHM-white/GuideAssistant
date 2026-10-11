@@ -218,6 +218,7 @@ jobs:
             /p:AppxPackageSigningEnabled=true `
             /p:PackageCertificateThumbprint=$env:CERT_THUMBPRINT `
             /p:AppxPackageVersion=$env:MSIX_VERSION `
+            /p:Version=$env:MSIX_VERSION `
             /p:AppxPackageDir="$packageRoot\"
 
           if ($LASTEXITCODE -ne 0) {

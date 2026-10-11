@@ -136,6 +136,24 @@ public sealed partial class ToolbarWindow : Window
     private void NewTabBtn_Click(object sender, RoutedEventArgs e)
         => _viewModel.AddNewTabCommand.Execute(null);
 
+    private async void SaveVideoMomentBtn_Click(object sender, RoutedEventArgs e)
+    {
+        SaveMomentButton.IsEnabled = false;
+        try
+        {
+            MomentStatusText.Text = await _viewModel.SaveVideoMomentAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Video moment save failed");
+            MomentStatusText.Text = "保存失败，请检查日志";
+        }
+        finally
+        {
+            SaveMomentButton.IsEnabled = true;
+        }
+    }
+
     // ── Navigation Bar ───────────────────────────────────
 
     private void InitializeNavBar()
