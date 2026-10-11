@@ -104,7 +104,9 @@ Release 另附 `SHA256SUMS.txt` 记录三个 ZIP 的 SHA256。可以在 PowerShe
 
 ## 重跑和更新已有发布
 
-标签对应的工作流失败时，可以在 **Actions > Release MSIX** 中打开失败的运行并点击 **Re-run jobs**，或者再次手动运行同一个远程标签。
+标签对应的工作流失败时，若已经修复了 workflow YAML，**不要直接对旧运行点击 Re-run jobs**：旧运行可能仍采用旧版本工作流，导致同样的错误。应先把修复 PR 合并到 master，再打开 **Actions > Release MSIX > Run workflow**，分支选 **master**，`tag` 填现有标签（例如 `v1.3.0`），启动**全新**运行。无需删除或重建原有 tag；工作流会从该 tag 检出应用源代码，但执行最新 master 上的工作流步骤。
+
+如果只是间歇性的网络或 runner 故障、工作流定义没有变，才适合直接对原运行使用 **Re-run jobs**。
 
 如果对应 Release 已存在，工作流会复用该 Release，并用同名资产覆盖旧文件。重跑完成后，请重新下载需要的 ZIP。
 

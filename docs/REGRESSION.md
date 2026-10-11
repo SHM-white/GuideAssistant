@@ -4,6 +4,7 @@
 - [ ] PR Windows x64 编译成功，确认缺失的 Win32 interop 已补齐
 - [ ] 不存在的 Release tag 在 preflight 即被拦截，避免同时占用三台构建机
 - [ ] 验证 MSIX x86、x64、ARM64 打包和签名后再建立正式 tag
+- [ ] MSIX 侧载目录包含主程序包和多个 Windows App SDK 依赖包时，正确定位并校验主程序 MSIX、保留所有安装依赖
 
 ## 组合快捷键（v1.3.0）
 - [ ] 旧版单键绑定升级后仍可用，显式“未绑定”不会回退至默认值
