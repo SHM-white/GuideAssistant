@@ -32,6 +32,15 @@ public partial class ToolbarViewModel : ObservableObject
     public IRelayCommand<string> SearchBookmarksCommand { get; }
     public IRelayCommand OpenSettingsCommand { get; }
 
+    // The main window owns the WebView2 player and provides the playback position.
+    public event Func<Task<string>>? SaveVideoMomentRequested;
+
+    public async Task<string> SaveVideoMomentAsync()
+    {
+        var handler = SaveVideoMomentRequested;
+        return handler == null ? "播放器尚未就绪" : await handler();
+    }
+
     public ToolbarViewModel(TabManager tabManager, BookmarkService bookmarkService, GameDetector gameDetector)
     {
         _tabManager = tabManager;

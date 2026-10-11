@@ -32,6 +32,7 @@ public sealed partial class MainWindow : Window
     private readonly AudioCaptureService _audioCapture;
     private readonly SpeechRecognitionService _speechRecognition;
     private readonly BilibiliApi _bilibiliApi;
+    private readonly BookmarkService _bookmarkService;
     private ToolbarViewModel? _toolbarVM;
     private WebView2AudioBridge? _audioBridge;
     private Microsoft.Web.WebView2.Core.CoreWebView2? _webMessageCoreWebView;
@@ -48,7 +49,7 @@ public sealed partial class MainWindow : Window
         SubtitleService subtitleService, DirectionService directionService,
         GameDetector gameDetector, HotkeyService hotkeyService, HotkeyConfigManager hotkeyConfigManager,
         IOverlayController overlayCtrl, AudioCaptureService audioCapture, SpeechRecognitionService speechRecognition,
-        BilibiliApi bilibiliApi)
+        BilibiliApi bilibiliApi, BookmarkService bookmarkService)
     {
         InitializeComponent();
         _viewModel = viewModel;
@@ -63,6 +64,7 @@ public sealed partial class MainWindow : Window
         _audioCapture = audioCapture;
         _speechRecognition = speechRecognition;
         _bilibiliApi = bilibiliApi;
+        _bookmarkService = bookmarkService;
 
         // React to hotkey binding changes (from Settings or elsewhere)
         _hotkeyConfigManager.BindingsChanged += () =>
@@ -348,6 +350,44 @@ public sealed partial class MainWindow : Window
         _toolbarVM.CloseTabRequested += tabId => WebViewControl.RemoveWebView(tabId);
         _toolbarVM.TabSwitched += tab => LoadTab(tab);
         _toolbarVM.SettingsRequested += OpenSettingsWindow;
+        _toolbarVM.SaveVideoMomentRequested += SaveVideoMomentAsync;
+    }
+
+    private async Task<string> SaveVideoMomentAsync()
+    {
+        var active = _tabManager.ActiveTab;
+        if (active == null || !BilibiliMomentLink.IsVideoUrl(active.Url))
+            return "请先打开 B 站视频，再记录播放时间";
+
+        try
+        {
+            var json = await WebViewControl.ExecuteScript("window.__gv_player?.getTime() ?? null");
+            if (!ReferenceEquals(active, _tabManager.ActiveTab))
+                return "标签页已切换，请重新保存";
+            if (string.IsNullOrWhiteSpace(json))
+                return "播放器尚未加载完成";
+
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("current", out var current) ||
+                !current.TryGetDouble(out var seconds) ||
+                !BilibiliMomentLink.TryCreate(active.Url, seconds, out var markedUrl, out var second))
+                return "无法读取有效的播放时间";
+
+            if (_bookmarkService.IsUrlBookmarked(markedUrl))
+                return "该时间点已经收藏";
+
+            var timeLabel = BilibiliMomentLink.FormatTime(second);
+            var title = string.IsNullOrWhiteSpace(active.Title) || active.Title == "新标签页"
+                ? "B站攻略" : active.Title;
+            _bookmarkService.QuickAdd($"{title} [{timeLabel}]", markedUrl, tags: "视频时间点");
+            return $"已收藏 {timeLabel}，从右侧收藏夹点击跳转";
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to save Bilibili playback position");
+            return "无法保存当前播放时间，请重试";
+        }
     }
 
     private void OpenSettingsWindow()
