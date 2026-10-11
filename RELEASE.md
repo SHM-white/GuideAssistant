@@ -72,7 +72,7 @@ git tag -a v1.2.3 -m "Release v1.2.3"
 git push origin v1.2.3
 ```
 
-推送标签后，`Release MSIX` 会自动运行。工作流会分别构建 `x86`、`x64` 和 `ARM64` 包，并创建或更新对应的 GitHub Release。
+推送标签后，`Release MSIX` 会自动运行。构建时会同步设置 MSIX 包版本与程序集版本，“关于”页面会优先读取实际安装包版本，非打包版本则显示程序集版本。工作流会分别构建 `x86`、`x64` 和 `ARM64` 包，并创建或更新对应的 GitHub Release。
 
 ## 手动运行
 

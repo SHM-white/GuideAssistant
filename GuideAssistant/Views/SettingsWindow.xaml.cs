@@ -25,6 +25,7 @@ public sealed partial class SettingsWindow : Window
         _viewModel.LoadHotkeys();
         HotkeyList.ItemsSource = _viewModel.HotkeyRows;
         LoadDisplaySettings();
+        VersionText.Text = Services.VersionInfo.GetDisplayVersion();
 
         SettingsNav.SelectedItem = SettingsNav.MenuItems[0];
 
