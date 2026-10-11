@@ -408,7 +408,11 @@ public sealed partial class MainWindow : Window
             else if (e.PropertyName == nameof(SettingsViewModel.IsMinimapFilterEnabled))
                 _viewModel.IsMinimapFilterEnabled = settingsVm.IsMinimapFilterEnabled;
             else if (e.PropertyName == nameof(SettingsViewModel.Opacity))
+            {
+                // Persist the same value we render; otherwise it reverts on restart.
+                _viewModel.Opacity = settingsVm.Opacity;
                 WeakReferenceMessenger.Default.Send(new OpacityChangedMessage(settingsVm.Opacity));
+            }
         };
         _settingsWindow = new SettingsWindow(settingsVm);
         _settingsWindow.Closed += (s, e) => _settingsWindow = null;

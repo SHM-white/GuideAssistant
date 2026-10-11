@@ -104,8 +104,8 @@ public partial class ToolbarViewModel : ObservableObject
         _tabManager.ActiveTab = tab;
         UrlBarText = tab.Url;
         IsCurrentBookmarked = _bookmarkService.IsUrlBookmarked(tab.Url);
+        // Switching to an existing tab must not reload its webpage/video.
         TabSwitched?.Invoke(tab);
-        NavigateToUrlRequested?.Invoke(tab.Url);
     }
 
     private void AddNewTab()

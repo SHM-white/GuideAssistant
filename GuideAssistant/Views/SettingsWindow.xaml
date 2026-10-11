@@ -48,7 +48,7 @@
                                                 Background="Transparent" BorderThickness="0"
                                                 Opacity="0.4"
                                                 Click="HotkeyClear_Click"
-                                                ToolTipService.ToolTip="重置快捷键" >
+                                                ToolTipService.ToolTip="清除快捷键绑定" >
                                             <SymbolIcon Symbol="Refresh" />
                                         </Button>
                                     </Grid>
