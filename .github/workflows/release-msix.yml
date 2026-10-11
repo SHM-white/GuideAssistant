@@ -263,10 +263,17 @@ jobs:
           }
 
           $sideLoadDir = $sideLoadDirs[0]
-          $msixPackages = @(Get-ChildItem -Path $sideLoadDir.FullName -Filter '*.msix' -File -Recurse)
-          if ($msixPackages.Count -ne 1) {
-            throw "Expected exactly one .msix under '$($sideLoadDir.FullName)', found $($msixPackages.Count)."
+          # A side-load directory normally also contains .msix dependencies
+          # (for example Windows App SDK packages). Do not count those as
+          # additional copies of the GuideAssistant application.
+          $expectedMainPackage = "GuideAssistant_$($env:MSIX_VERSION)_${{ matrix.appxBundlePlatform }}.msix"
+          $mainPackagePath = Join-Path $sideLoadDir.FullName $expectedMainPackage
+          if (-not (Test-Path -LiteralPath $mainPackagePath -PathType Leaf)) {
+            $availableMsix = @(Get-ChildItem -LiteralPath $sideLoadDir.FullName -Filter '*.msix' -Recurse -File |
+              Select-Object -ExpandProperty FullName)
+            throw "Main application MSIX '$expectedMainPackage' not found in '$($sideLoadDir.FullName)'. Found: $($availableMsix -join ', ')"
           }
+          Write-Host "Verifying primary MSIX '$mainPackagePath'; any dependency MSIX packages remain in the side-load ZIP."
 
           $signTools = @(Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter 'signtool.exe' -Recurse -File |
             Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
@@ -276,7 +283,7 @@ jobs:
           }
 
           $signtoolPath = $signTools[0].FullName
-          & $signtoolPath verify /pa /all /v $msixPackages[0].FullName
+          & $signtoolPath verify /pa /all /v $mainPackagePath
           if ($LASTEXITCODE -ne 0) {
             throw "signtool signature verification failed with exit code $LASTEXITCODE."
           }
