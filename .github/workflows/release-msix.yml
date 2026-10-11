@@ -15,7 +15,29 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    name: Validate release prerequisites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tag and signing Secrets
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          HAS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 != '' }}
+          HAS_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD != '' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo '::error::Tag must match vMAJOR.MINOR.PATCH.'
+            exit 1
+          fi
+          if [[ "$HAS_CERTIFICATE" != 'true' || "$HAS_PASSWORD" != 'true' ]]; then
+            echo '::error::Missing WINDOWS_CERTIFICATE_BASE64 or WINDOWS_CERTIFICATE_PASSWORD. See RELEASE.md.'
+            exit 1
+          fi
+
   build:
+    needs: preflight
     name: Build ${{ matrix.architecture }} MSIX
     runs-on: windows-latest
     strategy:

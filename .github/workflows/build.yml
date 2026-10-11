@@ -1,0 +1,41 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile Windows x64 (unsigned)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+      - uses: microsoft/setup-msbuild@v2
+      - name: Restore and compile
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          msbuild GuideAssistant/GuideAssistant.csproj /restore /m `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:RuntimeIdentifier=win-x64 `
+            /p:PublishProfile= `
+            /p:GenerateAppxPackageOnBuild=false `
+            /p:AppxPackageSigningEnabled=false `
+            /p:AppxBundle=Never
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows x64 compilation failed (exit $LASTEXITCODE)."
+          }
