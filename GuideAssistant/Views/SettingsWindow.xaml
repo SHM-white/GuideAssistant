@@ -27,7 +27,7 @@
                 <ScrollViewer x:Name="HotkeysPage" Visibility="Visible">
                     <StackPanel Spacing="8" Padding="24,16">
                         <TextBlock Text="自定义快捷键" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" />
-                        <TextBlock Text="点击快捷键进入绑定，按 Esc 取消。" FontSize="12" Opacity="0.6" Margin="0,0,0,8" />
+                        <TextBlock Text="点击快捷键绑定 Ctrl/Alt/Shift/Win 组合键；同一组合键可对应多个操作，Esc 取消。" FontSize="12" Opacity="0.6" Margin="0,0,0,8" />
                         <ListView x:Name="HotkeyList" SelectionMode="None">
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="local:HotkeyRow">
@@ -87,8 +87,8 @@
                        CloseButtonText="取消"
                        Style="{StaticResource DefaultContentDialogStyle}">
                     <StackPanel x:Name="KeyCaptureContent" Spacing="8" HorizontalAlignment="Center" Padding="0,8"
-                        IsTabStop="True" KeyDown="OnKeyCaptureKeyDown">
-                        <TextBlock Text="请按下想要绑定的按键…" FontSize="14" TextAlignment="Center" />
+                        IsTabStop="True" KeyDown="OnKeyCaptureKeyDown" KeyUp="OnKeyCaptureKeyUp">
+                        <TextBlock Text="按住修饰键，再按目标键…" FontSize="14" TextAlignment="Center" />
                         <TextBlock Text="按 Esc 或点击取消放弃修改" FontSize="12" TextAlignment="Center" Opacity="0.5" />
                     </StackPanel>
                 </ContentDialog>

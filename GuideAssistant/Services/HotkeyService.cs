@@ -6,7 +6,7 @@ namespace GuideAssistant.Services;
 
 public class HotkeyService : IDisposable
 {
-    private readonly Dictionary<int, List<(string action, Action callback)>> _bindings = new();
+    private readonly Dictionary<(int Vk, int Modifiers), List<(string action, Action callback)>> _bindings = new();
     private IntPtr _hookId = IntPtr.Zero;
     private LowLevelKeyboardProc? _proc;
     private GCHandle _gcHandle;
@@ -14,7 +14,7 @@ public class HotkeyService : IDisposable
 
     /// <summary>Anti-duplicate: tracks last trigger time (ms) per virtual key to prevent
     /// the low-level hook from firing the same action multiple times in quick succession.</summary>
-    private readonly Dictionary<int, long> _lastTriggerTick = new();
+    private readonly Dictionary<(int Vk, int Modifiers), long> _lastTriggerTick = new();
     private const long DedupWindowMs = 300;
 
     /// <summary>Set to true during key-rebind capture to suppress all hotkey actions.</summary>
@@ -37,16 +37,17 @@ public class HotkeyService : IDisposable
         foreach (var b in bindings)
         {
             if (b.VirtualKey == 0) continue;
-            if (!_bindings.TryGetValue(b.VirtualKey, out var list))
+            var chord = (b.VirtualKey, b.Modifiers & ModifierMask);
+            if (!_bindings.TryGetValue(chord, out var list))
             {
                 list = new List<(string, Action)>();
-                _bindings[b.VirtualKey] = list;
+                _bindings[chord] = list;
             }
             list.Add((b.ActionName, () => HotkeyTriggered?.Invoke(b.ActionName)));
         }
         Log.Information("Hotkey bindings updated: {Count} keys, total {Total} actions, keys=[{Keys}]",
             _bindings.Count, _bindings.Values.Sum(v => v.Count),
-            string.Join(",", _bindings.Keys.Select(k => $"0x{k:X}")));
+            string.Join(",", _bindings.Keys.Select(k => $"0x{k.Vk:X}/0x{k.Modifiers:X}")));
     }
 
     /// <summary>
@@ -100,9 +101,11 @@ public class HotkeyService : IDisposable
                 return CallNextHookEx(_hookId, nCode, wParam, lParam);
             }
 
-            if (_bindings.TryGetValue(vkCode, out var entries))
+            int modifiers = ReadCurrentModifiers() & ~ModifierForKey(vkCode);
+            // Intentionally allow several actions to share the same full chord.
+            if (_bindings.TryGetValue((vkCode, modifiers), out var entries))
             {
-                if (!TryAcquireTriggerSlot(vkCode))
+                if (!TryAcquireTriggerSlot((vkCode, modifiers)))
                     return CallNextHookEx(_hookId, nCode, wParam, lParam);
 
                 foreach (var entry in entries)
@@ -125,14 +128,14 @@ public class HotkeyService : IDisposable
     /// Returns true if this virtual key hasn't been triggered within the dedup window.
     /// Prevents the low-level hook from double-firing.
     /// </summary>
-    private bool TryAcquireTriggerSlot(int vk)
+    private bool TryAcquireTriggerSlot((int Vk, int Modifiers) chord)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         lock (_lastTriggerTick)
         {
-            if (_lastTriggerTick.TryGetValue(vk, out var last) && (now - last) < DedupWindowMs)
+            if (_lastTriggerTick.TryGetValue(chord, out var last) && (now - last) < DedupWindowMs)
                 return false;
-            _lastTriggerTick[vk] = now;
+            _lastTriggerTick[chord] = now;
         }
         return true;
     }
@@ -143,6 +146,48 @@ public class HotkeyService : IDisposable
         _disposed = true;
         Stop();
         _bindings.Clear();
+    }
+
+    // ── Modifier support (stored as Ctrl=1, Alt=2, Shift=4, Win=8) ──
+    public const int ControlModifier = 1;
+    public const int AltModifier = 2;
+    public const int ShiftModifier = 4;
+    public const int WindowsModifier = 8;
+    public const int ModifierMask = ControlModifier | AltModifier | ShiftModifier | WindowsModifier;
+
+    private static bool IsDown(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+
+    public static bool IsModifierKey(int vk) => ModifierForKey(vk) != 0;
+
+    private static int ModifierForKey(int vk) => vk switch
+    {
+        0x10 or 0xA0 or 0xA1 => ShiftModifier,
+        0x11 or 0xA2 or 0xA3 => ControlModifier,
+        0x12 or 0xA4 or 0xA5 => AltModifier,
+        0x5B or 0x5C => WindowsModifier,
+        _ => 0
+    };
+
+    public static int ReadCurrentModifiers()
+    {
+        int modifiers = 0;
+        if (IsDown(0x11) || IsDown(0xA2) || IsDown(0xA3)) modifiers |= ControlModifier;
+        if (IsDown(0x12) || IsDown(0xA4) || IsDown(0xA5)) modifiers |= AltModifier;
+        if (IsDown(0x10) || IsDown(0xA0) || IsDown(0xA1)) modifiers |= ShiftModifier;
+        if (IsDown(0x5B) || IsDown(0x5C)) modifiers |= WindowsModifier;
+        return modifiers;
+    }
+
+    public static string FormatBinding(int vk, int modifiers = 0)
+    {
+        if (vk == 0) return "未绑定";
+        var parts = new List<string>(5);
+        if ((modifiers & ControlModifier) != 0) parts.Add("Ctrl");
+        if ((modifiers & AltModifier) != 0) parts.Add("Alt");
+        if ((modifiers & ShiftModifier) != 0) parts.Add("Shift");
+        if ((modifiers & WindowsModifier) != 0) parts.Add("Win");
+        parts.Add(VirtualKeyToDisplayName(vk));
+        return string.Join("+", parts);
     }
 
     // ── Known actions & display ──────────────────────────────────
@@ -195,6 +240,9 @@ public class HotkeyService : IDisposable
     private static readonly IntPtr WM_SYSKEYDOWN = (IntPtr)0x0104;
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);

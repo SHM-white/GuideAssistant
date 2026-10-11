@@ -15,10 +15,10 @@ public class HotkeyRepository
     public List<HotkeyProfile> GetAllProfiles()
     {
         using var conn = _db.CreateConnection();
-        var profiles = conn.Query<HotkeyProfile>("SELECT * FROM hotkey_profiles ORDER BY is_default DESC, name").ToList();
+        var profiles = conn.Query<HotkeyProfile>("SELECT id AS Id, name AS Name, game_id AS GameId, is_default AS IsDefault FROM hotkey_profiles ORDER BY is_default DESC, name").ToList();
         foreach (var p in profiles)
         {
-            p.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = p.Id }).ToList();
+            p.Bindings = conn.Query<HotkeyBinding>("SELECT id AS Id, profile_id AS ProfileId, action_name AS ActionName, action_display AS ActionDisplay, modifiers AS Modifiers, virtual_key AS VirtualKey, display_text AS DisplayText FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = p.Id }).ToList();
         }
         return profiles;
     }
@@ -30,10 +30,10 @@ public class HotkeyRepository
             return cached;
 
         using var conn = _db.CreateConnection();
-        var profile = conn.QueryFirstOrDefault<HotkeyProfile>("SELECT * FROM hotkey_profiles WHERE is_default=1");
+        var profile = conn.QueryFirstOrDefault<HotkeyProfile>("SELECT id AS Id, name AS Name, game_id AS GameId, is_default AS IsDefault FROM hotkey_profiles WHERE is_default=1");
         if (profile != null)
         {
-            profile.Bindings = conn.Query<HotkeyBinding>("SELECT * FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = profile.Id }).ToList();
+            profile.Bindings = conn.Query<HotkeyBinding>("SELECT id AS Id, profile_id AS ProfileId, action_name AS ActionName, action_display AS ActionDisplay, modifiers AS Modifiers, virtual_key AS VirtualKey, display_text AS DisplayText FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = profile.Id }).ToList();
             _profileCache[0] = profile;
         }
         return profile;
@@ -72,15 +72,15 @@ public class HotkeyRepository
             profileId, bindings.Count, saved, skipped);
     }
 
-    public void SaveBinding(int profileId, string actionName, string actionDisplay, int virtualKey, string displayText)
+    public void SaveBinding(int profileId, string actionName, string actionDisplay, int virtualKey, string displayText, int modifiers = 0)
     {
         using var conn = _db.CreateConnection();
         using var tx = conn.BeginTransaction();
         conn.Execute("DELETE FROM hotkey_bindings WHERE profile_id=@pid AND action_name=@name",
             new { pid = profileId, name = actionName }, tx);
         conn.Execute(@"INSERT OR REPLACE INTO hotkey_bindings (profile_id, action_name, action_display, modifiers, virtual_key, display_text)
-            VALUES (@pid, @name, @display, 0, @vk, @text)",
-            new { pid = profileId, name = actionName, display = actionDisplay, vk = virtualKey, text = displayText }, tx);
+            VALUES (@pid, @name, @display, @modifiers, @vk, @text)",
+            new { pid = profileId, name = actionName, display = actionDisplay, modifiers, vk = virtualKey, text = displayText }, tx);
         tx.Commit();
         InvalidateCache();
         Log.Information("SaveBinding: profile={ProfileId}, action={Action}, vk={VK}", profileId, actionName, virtualKey);

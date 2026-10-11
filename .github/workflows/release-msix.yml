@@ -14,6 +14,11 @@ on:
 permissions:
   contents: read
 
+# Prevent overlapping release attempts for the same tag (including manual reruns).
+concurrency:
+  group: msix-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   preflight:
     name: Validate release prerequisites
@@ -41,6 +46,25 @@ jobs:
             echo "::error::Release tag '${RELEASE_TAG}' does not exist."
             exit 1
           fi
+
+      - name: Checkout tagged source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Verify released commit and version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/master:refs/remotes/origin/master"
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/master; then
+            echo "::error::The release tag must reference a commit merged into master."
+            exit 1
+          fi
+          python scripts/verify_release_version.py --tag "$RELEASE_TAG"
 
   build:
     needs: preflight
@@ -367,6 +391,15 @@ jobs:
             fi
           done
 
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum "GuideAssistant-${RELEASE_TAG}-x86.zip" \
+                    "GuideAssistant-${RELEASE_TAG}-x64.zip" \
+                    "GuideAssistant-${RELEASE_TAG}-ARM64.zip" > SHA256SUMS.txt
+
       - name: Create or update GitHub Release
         shell: bash
         env:
@@ -384,5 +417,6 @@ jobs:
             "release-assets/GuideAssistant-${RELEASE_TAG}-x86.zip" \
             "release-assets/GuideAssistant-${RELEASE_TAG}-x64.zip" \
             "release-assets/GuideAssistant-${RELEASE_TAG}-ARM64.zip" \
+            "release-assets/SHA256SUMS.txt" \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber

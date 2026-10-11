@@ -13,6 +13,8 @@ public sealed partial class SettingsWindow : Window
 {
     private readonly SettingsViewModel _viewModel;
     private int? _pendingKey;
+    private int _pendingModifiers;
+    private int? _lastModifierKey;
 
     public SettingsWindow(SettingsViewModel viewModel)
     {
@@ -93,13 +95,15 @@ public sealed partial class SettingsWindow : Window
         _viewModel.StartKeyCaptureCommand.Execute(row);
         KeyCaptureDialog.Title = _viewModel.KeyCaptureTitle;
         _pendingKey = null;
+        _pendingModifiers = 0;
+        _lastModifierKey = null;
 
         KeyCaptureDialog.Opened += OnKeyCaptureDialogOpened;
         await KeyCaptureDialog.ShowAsync();
         KeyCaptureDialog.Opened -= OnKeyCaptureDialogOpened;
 
         if (_pendingKey.HasValue)
-            _viewModel.OnKeyCaptured(_pendingKey.Value);
+            _viewModel.OnKeyCaptured(_pendingKey.Value, _pendingModifiers);
         else
             _viewModel.CancelKeyCapture();
     }
@@ -115,7 +119,27 @@ public sealed partial class SettingsWindow : Window
             return; // Let ContentDialog handle ESC via its CloseButton
 
         e.Handled = true;
+        var key = (int)e.Key;
+        if (HotkeyService.IsModifierKey(key))
+        {
+            // Release the modifier alone to bind it as a single key.
+            _lastModifierKey = key;
+            return;
+        }
+
+        _pendingKey = key;
+        _pendingModifiers = HotkeyService.ReadCurrentModifiers();
+        KeyCaptureDialog.Hide();
+    }
+
+    private void OnKeyCaptureKeyUp(object sender, KeyRoutedEventArgs e)
+    {
+        if (_pendingKey.HasValue || _lastModifierKey != (int)e.Key)
+            return;
+
+        e.Handled = true;
         _pendingKey = (int)e.Key;
+        _pendingModifiers = 0;
         KeyCaptureDialog.Hide();
     }
 
