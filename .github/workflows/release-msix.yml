@@ -159,6 +159,15 @@ jobs:
             throw "Certificate Subject '$($signingCertificate.Subject)' does not exactly match manifest Publisher '$env:MANIFEST_PUBLISHER'."
           }
 
+          # Let signtool verify a self-signed certificate on this ephemeral runner.
+          if ($signingCertificate.Subject -eq $signingCertificate.Issuer) {
+            $cerPath = Join-Path $env:RUNNER_TEMP 'windows-signing-certificate.cer'
+            Export-Certificate -Cert $signingCertificate -FilePath $cerPath | Out-Null
+            Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+            "CERT_TRUST_THUMBPRINT_TO_CLEAN=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "CER_PATH=$cerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
           "CERT_THUMBPRINT=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CERT_THUMBPRINT_TO_CLEAN=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PFX_PATH=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -275,6 +284,15 @@ jobs:
 
           if (-not [string]::IsNullOrWhiteSpace($env:PFX_PATH) -and (Test-Path -LiteralPath $env:PFX_PATH)) {
             Remove-Item -LiteralPath $env:PFX_PATH -Force
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:CERT_TRUST_THUMBPRINT_TO_CLEAN)) {
+            $trustedCertPath = "Cert:\CurrentUser\TrustedPeople\$env:CERT_TRUST_THUMBPRINT_TO_CLEAN"
+            if (Test-Path -LiteralPath $trustedCertPath) {
+              Remove-Item -LiteralPath $trustedCertPath -Force
+            }
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:CER_PATH) -and (Test-Path -LiteralPath $env:CER_PATH)) {
+            Remove-Item -LiteralPath $env:CER_PATH -Force
           }
 
   release:
