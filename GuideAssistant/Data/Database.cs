@@ -119,56 +119,53 @@ public class Database
 
     private static void RebuildBookmarksIfNeeded(SqliteConnection conn)
     {
-        using var checkCmd = conn.CreateCommand();
-        checkCmd.CommandText = "SELECT value FROM settings WHERE key = 'db_version'";
-        var currentVersion = checkCmd.ExecuteScalar() as string;
-
-        if (currentVersion != "3")
+        using var versionCmd = conn.CreateCommand();
+        versionCmd.CommandText = "SELECT value FROM settings WHERE key = 'db_version'";
+        var currentVersion = versionCmd.ExecuteScalar() as string;
+        if (int.TryParse(currentVersion, out var version) && version > 3)
         {
-            using var rebuildCmd = conn.CreateCommand();
-            if (currentVersion == "2")
-            {
-                // Migrate from v2 to v3: add folder support
-                rebuildCmd.CommandText = @"
-                    CREATE TABLE IF NOT EXISTS bookmark_folders (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        sort_order INTEGER DEFAULT 0,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    );
-                    ALTER TABLE bookmarks ADD COLUMN folder_id INTEGER REFERENCES bookmark_folders(id);
-                    INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '3');
-                ";
-            }
-            else
-            {
-                // Fresh install: rebuild bookmarks + add folders
-                rebuildCmd.CommandText = @"
-                    DROP TABLE IF EXISTS bookmarks;
-                    CREATE TABLE bookmarks (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        game_id INTEGER REFERENCES games(id) ON DELETE CASCADE,
-                        folder_id INTEGER REFERENCES bookmark_folders(id),
-                        title TEXT NOT NULL,
-                        url TEXT NOT NULL,
-                        favicon_url TEXT,
-                        tags TEXT,
-                        notes TEXT,
-                        is_favorite INTEGER DEFAULT 0,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    );
-                    CREATE TABLE IF NOT EXISTS bookmark_folders (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        sort_order INTEGER DEFAULT 0,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    );
-                    INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '3');
-                ";
-            }
-            rebuildCmd.ExecuteNonQuery();
-            Log.Information("Database migrated to db_version 3 (folder support)");
+            Log.Warning("Database version {Version} is newer than this application", version);
+            return;
         }
+
+        using var columnsCmd = conn.CreateCommand();
+        columnsCmd.CommandText = "PRAGMA table_info(bookmarks)";
+        using var reader = columnsCmd.ExecuteReader();
+        bool hasFolderId = false;
+        while (reader.Read())
+            if (string.Equals(reader.GetString(1), "folder_id", StringComparison.OrdinalIgnoreCase))
+                hasFolderId = true;
+        reader.Close();
+        if (currentVersion == "3" && hasFolderId) return;
+
+        // Never drop a user's existing bookmarks, even if version metadata is missing.
+        using var countCmd = conn.CreateCommand();
+        countCmd.CommandText = "SELECT COUNT(*) FROM bookmarks";
+        if (Convert.ToInt64(countCmd.ExecuteScalar()) > 0)
+        {
+            var backupPath = conn.DataSource + ".pre-v3.bak";
+            if (!File.Exists(backupPath))
+            {
+                using var backup = new SqliteConnection($"Data Source={backupPath}");
+                backup.Open();
+                conn.BackupDatabase(backup);
+                Log.Information("Database migration backup saved at {Path}", backupPath);
+            }
+        }
+
+        using var tx = conn.BeginTransaction();
+        if (!hasFolderId)
+        {
+            using var addColumn = conn.CreateCommand();
+            addColumn.Transaction = tx;
+            addColumn.CommandText = "ALTER TABLE bookmarks ADD COLUMN folder_id INTEGER REFERENCES bookmark_folders(id)";
+            addColumn.ExecuteNonQuery();
+        }
+        using var update = conn.CreateCommand();
+        update.Transaction = tx;
+        update.CommandText = "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '3')";
+        update.ExecuteNonQuery();
+        tx.Commit();
+        Log.Information("Database upgraded to version 3 without deleting bookmarks");
     }
 }

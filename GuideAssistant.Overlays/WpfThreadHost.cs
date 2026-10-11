@@ -108,10 +108,7 @@ public class WpfThreadHost : IOverlayController
     {
         _dispatcher?.InvokeAsync(() =>
         {
-            if (_subtitle == null && !string.IsNullOrEmpty(text))
-            {
-                ShowSubtitle();
-            }
+            // Respect explicit subtitle toggle; background text must not recreate it.
             _subtitle?.ShowText(text);
         });
     }

@@ -6,7 +6,7 @@ using Serilog;
 
 namespace GuideAssistant.ViewModels;
 
-public partial class SettingsViewModel : ObservableObject
+public partial class SettingsViewModel : ObservableObject, IDisposable
 {
     private readonly HotkeyConfigManager _hotkeyConfigManager;
     private bool _isSubtitleEnabled;
@@ -127,6 +127,12 @@ public partial class SettingsViewModel : ObservableObject
     {
         if (row == null) return;
         _hotkeyConfigManager.ClearBinding(row.ActionName);
+    }
+
+    public void Dispose()
+    {
+        if (IsCapturingKey) CancelKeyCapture();
+        _hotkeyConfigManager.BindingsChanged -= LoadHotkeys;
     }
 }
 

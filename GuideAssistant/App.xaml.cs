@@ -42,14 +42,7 @@ namespace GuideAssistant
             ConfigureServices(services);
             Services = services.BuildServiceProvider();
 
-#if DEBUG
-            // Clear database on each debug launch to avoid stale data interference
-            var dbPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "GuideAssistant", "data.db");
-            try { System.IO.File.Delete(dbPath); Log.Information("DEBUG: Database cleared at {Path}", dbPath); }
-            catch (System.IO.IOException) { /* file may be locked by a previous run */ }
-#endif
+            // Debug launches preserve user data. Unit tests must use isolated databases.
 
             // Initialize database
             var db = Services.GetRequiredService<Database>();
