@@ -62,7 +62,7 @@ public class HotkeyConfigManager
         }
     }
 
-    public void SaveBinding(string actionName, int virtualKey)
+    public void SaveBinding(string actionName, int virtualKey, int modifiers = 0)
     {
         if (string.IsNullOrEmpty(actionName))
         {
@@ -79,7 +79,7 @@ public class HotkeyConfigManager
         }
 
         _repo.SaveBinding(_defaultProfileId, actionName, def.DisplayName, virtualKey,
-            HotkeyService.VirtualKeyToDisplayName(virtualKey));
+            HotkeyService.FormatBinding(virtualKey, modifiers), modifiers & HotkeyService.ModifierMask);
         Log.Information("Hotkey saved via ConfigManager: {Action} => VK {Key}", actionName, virtualKey);
         RefreshAndNotify();
     }
@@ -157,7 +157,10 @@ public class HotkeyConfigManager
         _mergedBindings = HotkeyService.KnownActions.Select(known =>
         {
             if (dbBindings.TryGetValue(known.ActionName, out var db))
+            {
+                db.DisplayText = HotkeyService.FormatBinding(db.VirtualKey, db.Modifiers);
                 return db;
+            }
             return new HotkeyBinding
             {
                 ActionName = known.ActionName,

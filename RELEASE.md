@@ -31,7 +31,7 @@ Import-Certificate -FilePath '.\GuideAssistant-signing.cer' -CertStoreLocation C
 
 `.github/workflows/build.yml` 会在向 `master` 提交、打开/更新 PR 或手动触发时执行 Windows x64 无签名编译检查。此任务**不依赖签名 Secrets，也不会发布安装包**。
 
-正式 Release 在标签推送时启动。它会先检查标签格式及签名 Secrets 是否齐全，然后才启动三架构 Windows 构建。
+正式 Release **不会因为合并 PR、推送普通分支或运行普通构建检查而触发**。仅推送符合格式的版本标签自动触发，或通过 Actions 手动指定已有的标签。预检首先确认 Secrets、标签存在、标签提交已合并进 master，并检查项目和 MSIX 版本一致；不通过则不会发布。
 
 ## 首次配置
 
@@ -65,6 +65,8 @@ git status
 git push origin HEAD
 ```
 
+发版前先将 `GuideAssistant/GuideAssistant.csproj` 的 `<Version>` 和 `GuideAssistant/Package.appxmanifest` 的 `Identity.Version` 分别设成对应版本（例如 `1.3.0`、`1.3.0.0`），合并到 master，再从 master 提交打标签。不能直接在未合并的 PR 分支上创建正式发布标签。
+
 然后创建带注释的标签并推送。把示例版本替换为实际版本：
 
 ```powershell
@@ -84,7 +86,7 @@ git push origin v1.2.3
 gh workflow run release-msix.yml -f tag=v1.2.3
 ```
 
-如果标签还没推送，先执行 `git push origin v1.2.3`。手动运行同样要求标签严格匹配 `vMAJOR.MINOR.PATCH`，并满足每个版本分量不超过 `65535`。
+在 Actions 网页点击 **Run workflow** 时，先在分支下拉框选 **master**，再在 `tag` 输入框填写已存在的版本标签。Run workflow **不会自动创建标签**。如果标签还没推送，先执行 `git push origin v1.2.3`。手动运行同样要求标签严格匹配 `vMAJOR.MINOR.PATCH`，并满足每个版本分量不超过 `65535`。
 
 ## 下载和安装
 
@@ -95,6 +97,8 @@ GuideAssistant-v1.2.3-x86.zip
 GuideAssistant-v1.2.3-x64.zip
 GuideAssistant-v1.2.3-ARM64.zip
 ```
+
+Release 另附 `SHA256SUMS.txt` 记录三个 ZIP 的 SHA256。可以在 PowerShell 运行 `Get-FileHash -Algorithm SHA256 .\GuideAssistant-v1.3.0-x64.zip` 核对。
 
 根据目标 Windows 设备的架构选择 ZIP。每个 ZIP 都包含完整的侧载目录和 `Add-AppDevPackage.ps1`。解压后按侧载目录中的脚本安装。工作流只发布已签名的包，不能依赖无签名包安装。
 

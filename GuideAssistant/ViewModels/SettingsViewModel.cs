@@ -64,7 +64,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         {
             var def = ActionDefs[i];
             var displayText = lookup.TryGetValue(def.ActionName, out var b)
-                ? b.DisplayText
+                ? HotkeyService.FormatBinding(b.VirtualKey, b.Modifiers)
                 : HotkeyService.VirtualKeyToDisplayName(
                     HotkeyService.KnownActions.First(a => a.ActionName == def.ActionName).DefaultVk);
 
@@ -100,7 +100,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         HotkeyService.SuppressAll = true;
     }
 
-    public void OnKeyCaptured(int virtualKey)
+    public void OnKeyCaptured(int virtualKey, int modifiers = 0)
     {
         if (CapturingRow == null) return;
         if (string.IsNullOrEmpty(CapturingRow.ActionName))
@@ -111,7 +111,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         HotkeyService.SuppressAll = false;
-        _hotkeyConfigManager.SaveBinding(CapturingRow.ActionName, virtualKey);
+        _hotkeyConfigManager.SaveBinding(CapturingRow.ActionName, virtualKey, modifiers);
         IsCapturingKey = false;
         CapturingRow = null;
     }
