@@ -2,6 +2,37 @@
 
 本项目的 GitHub Actions 工作流名为 **Release MSIX**，文件是 `.github/workflows/release-msix.yml`。它会构建已签名的 MSIX 侧载包，并发布到 GitHub Release。
 
+## 没有 PFX 证书时：一次性生成
+
+如果旧版本已经用某张证书发布过，**应优先继续使用同一张 PFX**。更换签名证书可能使已安装用户无法直接升级。
+
+在 Windows PowerShell 中，从项目根目录运行：
+
+```powershell
+.\scripts\New-WindowsSigningCertificate.ps1
+```
+
+脚本在用户主目录的 `GuideAssistant-signing` 文件夹生成两个文件：
+
+- `GuideAssistant-signing.pfx`：包含私钥，用于发布签名，不可公开。
+- `GuideAssistant-signing.cer`：公开证书，可以提供给安装者以建立本机信任。
+
+将脚本提示的 PFX Base64 和密码配置为下面的两个 GitHub Actions Secrets。脚本不会自行上传它们。
+
+**注意：自签名证书不具备公开 CA 的默认信任。** 安装者在确认软件来源后，需要把公开的 `.cer` 安装到 Windows 的 `TrustedPeople` 证书存储区（通常使用管理员 PowerShell）：
+
+```powershell
+Import-Certificate -FilePath '.\GuideAssistant-signing.cer' -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+```
+
+信任发布者意味着信任该证书签名的软件。仅安装可信来源的证书。如需免去用户手动建立信任，请采用合适的受信任代码签名方案。
+
+## 日常编译检查
+
+`.github/workflows/build.yml` 会在向 `master` 提交、打开/更新 PR 或手动触发时执行 Windows x64 无签名编译检查。此任务**不依赖签名 Secrets，也不会发布安装包**。
+
+正式 Release 在标签推送时启动。它会先检查标签格式及签名 Secrets 是否齐全，然后才启动三架构 Windows 构建。
+
 ## 首次配置
 
 开始前确认：
