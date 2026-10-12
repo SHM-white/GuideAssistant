@@ -164,9 +164,21 @@ public sealed partial class MainWindow : Window
             // Update toolbar address bar for every navigation
             _toolbarVM?.OnUrlChanged(url);
 
-            if (url.Contains("bilibili.com/video/"))
+            if (BilibiliMomentLink.IsVideoUrl(url))
             {
                 _ = HandleBilibiliVideoNavigationAsync(url, navigationVersion);
+            }
+            else
+            {
+                if (_webMessageCoreWebView != null)
+                {
+                    _webMessageCoreWebView.WebMessageReceived -= OnWebMessageReceived;
+                    _webMessageCoreWebView = null;
+                }
+                _audioBridge?.Dispose();
+                _audioBridge = null;
+                _subtitleService.SetCoreWebView(null);
+                _ = _subtitleService.StopSessionAsync();
             }
         };
         WebViewControl.LoadingStateChanged += isLoading => _viewModel.IsLoading = isLoading;
@@ -333,8 +345,8 @@ public sealed partial class MainWindow : Window
         {
             if (_tabManager.ActiveTab != null)
             {
-                LoadTab(_tabManager.ActiveTab);
-                _tabManager.Navigate(_tabManager.ActiveTab, url);
+                // Navigate once; duplicate CoreWebView2.Navigate calls reset playback.
+                _tabManager.ActiveTab.Url = url;
                 WebViewControl.Navigate(url);
             }
         };
