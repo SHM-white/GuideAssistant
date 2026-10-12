@@ -69,6 +69,7 @@ public class Database
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 game_id INTEGER REFERENCES games(id),
+                game_config_id INTEGER REFERENCES game_configs(id),
                 is_default INTEGER DEFAULT 0
             );
 
@@ -113,8 +114,34 @@ public class Database
 
         // One-time rebuild of bookmarks table
         RebuildBookmarksIfNeeded(conn);
+        EnsureGameHotkeyProfiles(conn);
 
         Log.Information("Database initialized");
+    }
+
+    private static void EnsureGameHotkeyProfiles(SqliteConnection conn)
+    {
+        using var columns = conn.CreateCommand();
+        columns.CommandText = "PRAGMA table_info(hotkey_profiles)";
+        using var reader = columns.ExecuteReader();
+        var hasColumn = false;
+        while (reader.Read())
+            hasColumn |= string.Equals(reader.GetString(1), "game_config_id", StringComparison.OrdinalIgnoreCase);
+        reader.Close();
+
+        using var tx = conn.BeginTransaction();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        if (!hasColumn)
+        {
+            cmd.CommandText = "ALTER TABLE hotkey_profiles ADD COLUMN game_config_id INTEGER REFERENCES game_configs(id)";
+            cmd.ExecuteNonQuery();
+        }
+        cmd.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS idx_hotkey_profiles_game_config ON hotkey_profiles(game_config_id) WHERE game_config_id IS NOT NULL";
+        cmd.ExecuteNonQuery();
+        cmd.CommandText = "INSERT INTO settings(key, value) VALUES('db_version', '4') ON CONFLICT(key) DO UPDATE SET value='4' WHERE CAST(settings.value AS INTEGER) < 4";
+        cmd.ExecuteNonQuery();
+        tx.Commit();
     }
 
     private static void RebuildBookmarksIfNeeded(SqliteConnection conn)
@@ -122,7 +149,7 @@ public class Database
         using var versionCmd = conn.CreateCommand();
         versionCmd.CommandText = "SELECT value FROM settings WHERE key = 'db_version'";
         var currentVersion = versionCmd.ExecuteScalar() as string;
-        if (int.TryParse(currentVersion, out var version) && version > 3)
+        if (int.TryParse(currentVersion, out var version) && version > 4)
         {
             Log.Warning("Database version {Version} is newer than this application", version);
             return;
@@ -136,7 +163,7 @@ public class Database
             if (string.Equals(reader.GetString(1), "folder_id", StringComparison.OrdinalIgnoreCase))
                 hasFolderId = true;
         reader.Close();
-        if (currentVersion == "3" && hasFolderId) return;
+        if ((currentVersion == "3" || currentVersion == "4") && hasFolderId) return;
 
         // Never drop a user's existing bookmarks, even if version metadata is missing.
         using var countCmd = conn.CreateCommand();
