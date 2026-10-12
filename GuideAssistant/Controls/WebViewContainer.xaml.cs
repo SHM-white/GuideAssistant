@@ -64,7 +64,16 @@ public sealed partial class WebViewContainer : UserControl
                     childWv.Visibility = Visibility.Collapsed;
             }
             wv.Visibility = Visibility.Visible;
+            bool changedTab = !ReferenceEquals(_webView, wv);
             _webView = wv;
+            if (changedTab)
+            {
+                // Switching tabs does not generate NavigationCompleted on cached pages.
+                // Notify the toolbar and subtitle manager of the active context.
+                UrlChanged?.Invoke(tab.Url);
+                TitleChanged?.Invoke(tab.Title);
+                LoadingStateChanged?.Invoke(tab.IsLoading);
+            }
 
             // Initial navigation is handled by EnsureCoreWebView2Async completion.
             if (wv.CoreWebView2 == null)
@@ -317,7 +326,8 @@ window.__gv_player = {
                 LoadingBar.Visibility = Visibility.Visible;
                 LoadingBar.IsIndeterminate = true;
             }
-            LoadingStateChanged?.Invoke(true);
+            if (wv == _webView)
+                LoadingStateChanged?.Invoke(true);
         };
 
         wv.CoreWebView2.NavigationCompleted += (s, e) =>
@@ -327,7 +337,8 @@ window.__gv_player = {
             {
                 LoadingBar.Visibility = Visibility.Collapsed;
             }
-            LoadingStateChanged?.Invoke(false);
+            if (wv == _webView)
+                LoadingStateChanged?.Invoke(false);
 
             tab.CanGoBack = wv.CoreWebView2.CanGoBack;
             tab.CanGoForward = wv.CoreWebView2.CanGoForward;

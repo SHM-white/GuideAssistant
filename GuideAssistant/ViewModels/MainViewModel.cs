@@ -113,12 +113,12 @@ public partial class MainViewModel : ObservableObject
     private void NavigateToUrl(string? url)
     {
         if (url == null || _tabManager.ActiveTab == null) return;
-        _tabManager.Navigate(_tabManager.ActiveTab, url);
+        _tabManager.ActiveTab.Url = url;
         CurrentUrl = url;
         IsCurrentUrlBookmarked = _bookmarkService.IsUrlBookmarked(url);
+        // The active WebView navigation callback owns subtitle session creation.
+        // Do not load a second subtitle session for the same request.
         WeakReferenceMessenger.Default.Send(new WebViewNavigateMessage(url));
-        if (url.Contains("bilibili.com/video/"))
-            _ = _subtitleService.LoadSubtitle(url);
     }
 
     private void NavigateBack() => WeakReferenceMessenger.Default.Send(new WebViewActionMessage(WebViewAction.GoBack));
@@ -142,12 +142,15 @@ public partial class MainViewModel : ObservableObject
     private void CloseTab(string? tabId)
     {
         if (tabId == null) return;
-        _tabManager.CloseTab(tabId);
+        // Remove the visual element while the cache still holds its WebView.
         WeakReferenceMessenger.Default.Send(new TabClosedMessage(tabId));
+        _tabManager.CloseTab(tabId);
         if (_tabManager.ActiveTab != null)
         {
             CurrentUrl = _tabManager.ActiveTab.Url;
             CurrentTitle = _tabManager.ActiveTab.Title;
+            IsCurrentUrlBookmarked = _bookmarkService.IsUrlBookmarked(CurrentUrl);
+            WeakReferenceMessenger.Default.Send(new SwitchTabMessage(_tabManager.ActiveTab));
         }
     }
 
