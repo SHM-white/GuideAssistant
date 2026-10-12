@@ -92,6 +92,7 @@ namespace GuideAssistant
                 var mainVm = sp.GetRequiredService<ViewModels.MainViewModel>();
                 return new ViewModels.SettingsViewModel(
                     sp.GetRequiredService<HotkeyConfigManager>(),
+                    sp.GetRequiredService<GameRepository>(),
                     mainVm.IsSubtitleEnabled,
                     mainVm.IsMiniMapEnabled,
                     mainVm.IsMinimapFilterEnabled,

@@ -22,6 +22,14 @@ public class GameDetector : IDisposable
     /// </summary>
     public string? CurrentForegroundGameName { get; private set; }
 
+    /// <summary>
+    /// Raised on the process scanner's background timer. Subscribers owning
+    /// UI/hotkey state should marshal to the UI DispatcherQueue.
+    /// Null means no configured game currently has keyboard focus.
+    /// </summary>
+    public event Action<GameConfig?>? ForegroundGameChanged;
+    private int? _foregroundGameConfigId;
+
     // Callback when game state changes
     public event Action<GameConfig, bool>? GameStateChanged;
 
@@ -48,6 +56,7 @@ public class GameDetector : IDisposable
         _launcher.StopAll();
         _activeGames.Clear();
         CurrentForegroundGameName = null;
+        _foregroundGameConfigId = null;
     }
 
     public void ReloadConfigs()
@@ -65,7 +74,7 @@ public class GameDetector : IDisposable
             uint foregroundPid = 0;
             if (hwnd != IntPtr.Zero) GetWindowThreadProcessId(hwnd, out foregroundPid);
             var foregroundProcess = foregroundPid == 0 ? "" : GetProcessName((int)foregroundPid);
-            string? focusedGame = null;
+            GameConfig? focusedGame = null;
 
             foreach (var config in _configs)
             {
@@ -100,9 +109,14 @@ public class GameDetector : IDisposable
                 }
 
                 if (running && string.Equals(foregroundProcess, executable, StringComparison.OrdinalIgnoreCase))
-                    focusedGame = config.GameName;
+                    focusedGame = config;
             }
-            CurrentForegroundGameName = focusedGame;
+            CurrentForegroundGameName = focusedGame?.GameName;
+            if (_foregroundGameConfigId != focusedGame?.Id)
+            {
+                _foregroundGameConfigId = focusedGame?.Id;
+                ForegroundGameChanged?.Invoke(focusedGame);
+            }
         }
         catch (Exception ex)
         {

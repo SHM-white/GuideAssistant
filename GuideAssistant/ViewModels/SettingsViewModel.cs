@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GuideAssistant.Data;
 using GuideAssistant.Services;
 using Serilog;
 
@@ -9,6 +10,7 @@ namespace GuideAssistant.ViewModels;
 public partial class SettingsViewModel : ObservableObject, IDisposable
 {
     private readonly HotkeyConfigManager _hotkeyConfigManager;
+    private readonly GameRepository _games;
     private bool _isSubtitleEnabled;
     private bool _isMiniMapEnabled;
     private bool _isMinimapFilterEnabled = true;
@@ -18,6 +20,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private bool _isCapturingKey;
     private string _keyCaptureTitle = "";
     private HotkeyRow? _capturingRow;
+    private int? _editingGameConfigId;
+    private string _scopeDescription = "";
 
     public bool IsSubtitleEnabled { get => _isSubtitleEnabled; set => SetProperty(ref _isSubtitleEnabled, value); }
     public bool IsMiniMapEnabled { get => _isMiniMapEnabled; set => SetProperty(ref _isMiniMapEnabled, value); }
@@ -28,8 +32,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public bool IsCapturingKey { get => _isCapturingKey; set => SetProperty(ref _isCapturingKey, value); }
     public string KeyCaptureTitle { get => _keyCaptureTitle; set => SetProperty(ref _keyCaptureTitle, value); }
     public HotkeyRow? CapturingRow { get => _capturingRow; set => SetProperty(ref _capturingRow, value); }
+    public int? EditingGameConfigId { get => _editingGameConfigId; private set => SetProperty(ref _editingGameConfigId, value); }
+    public string ScopeDescription { get => _scopeDescription; private set => SetProperty(ref _scopeDescription, value); }
 
     public ObservableCollection<HotkeyRow> HotkeyRows { get; } = new();
+    public ObservableCollection<HotkeyScopeOption> HotkeyScopes { get; } = new();
 
     private static readonly (string ActionName, string DisplayName)[] ActionDefs =
         HotkeyService.KnownActions.Select(a => (a.ActionName, a.DisplayName)).ToArray();
@@ -38,9 +45,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public IRelayCommand<HotkeyRow> StartKeyCaptureCommand { get; }
     public IRelayCommand<HotkeyRow> ClearHotkeyCommand { get; }
 
-    public SettingsViewModel(HotkeyConfigManager hotkeyConfigManager, bool isSubtitleEnabled, bool isMiniMapEnabled, bool isMinimapFilterEnabled, double opacity)
+    public SettingsViewModel(
+        HotkeyConfigManager hotkeyConfigManager, GameRepository games,
+        bool isSubtitleEnabled, bool isMiniMapEnabled,
+        bool isMinimapFilterEnabled, double opacity)
     {
         _hotkeyConfigManager = hotkeyConfigManager;
+        _games = games;
         _isSubtitleEnabled = isSubtitleEnabled;
         _isMiniMapEnabled = isMiniMapEnabled;
         _isMinimapFilterEnabled = isMinimapFilterEnabled;
@@ -50,45 +61,72 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         SelectPageCommand = new RelayCommand<string>(p => { if (p != null) SelectedPage = p; });
         StartKeyCaptureCommand = new RelayCommand<HotkeyRow>(StartKeyCapture);
         ClearHotkeyCommand = new RelayCommand<HotkeyRow>(ClearHotkey);
-
-        // Keep UI in sync with config manager changes
         _hotkeyConfigManager.BindingsChanged += LoadHotkeys;
+        RefreshScopes();
+    }
+
+    public void RefreshScopes()
+    {
+        var current = EditingGameConfigId;
+        HotkeyScopes.Clear();
+        HotkeyScopes.Add(new HotkeyScopeOption(null, "全局默认方案"));
+        foreach (var game in _games.GetAll())
+            HotkeyScopes.Add(new HotkeyScopeOption(game.Id, game.GameName));
+        if (current is int id && !HotkeyScopes.Any(x => x.GameConfigId == id))
+            EditingGameConfigId = null;
+        LoadHotkeys();
+    }
+
+    public void SelectScope(int? gameConfigId)
+    {
+        if (gameConfigId is not null && !HotkeyScopes.Any(x => x.GameConfigId == gameConfigId))
+            gameConfigId = null;
+        EditingGameConfigId = gameConfigId;
+        LoadHotkeys();
+    }
+
+    public void ResetSelectedGameProfile()
+    {
+        if (EditingGameConfigId is int id)
+            _hotkeyConfigManager.ResetGameProfile(id);
     }
 
     public void LoadHotkeys()
     {
-        var merged = _hotkeyConfigManager.GetMergedBindings();
+        var merged = _hotkeyConfigManager.GetBindingsForScope(EditingGameConfigId);
         var lookup = merged.ToDictionary(b => b.ActionName);
-
         for (int i = 0; i < ActionDefs.Length; i++)
         {
             var def = ActionDefs[i];
             var displayText = lookup.TryGetValue(def.ActionName, out var b)
                 ? HotkeyService.FormatBinding(b.VirtualKey, b.Modifiers)
-                : HotkeyService.VirtualKeyToDisplayName(
-                    HotkeyService.KnownActions.First(a => a.ActionName == def.ActionName).DefaultVk);
-
-            if (i < HotkeyRows.Count)
-                {
-                    // In-place update: only change CurrentBinding property
-                    var row = HotkeyRows[i];
-                    if (row.ActionName == def.ActionName)
-                        row.CurrentBinding = displayText;
-                }
+                : "未绑定";
+            if (i < HotkeyRows.Count && HotkeyRows[i].ActionName == def.ActionName)
+                HotkeyRows[i].CurrentBinding = displayText;
             else
             {
-                HotkeyRows.Add(new HotkeyRow
+                var row = new HotkeyRow
                 {
                     ActionName = def.ActionName,
                     DisplayName = def.DisplayName,
                     CurrentBinding = displayText
-                });
+                };
+                if (i < HotkeyRows.Count) HotkeyRows[i] = row;
+                else HotkeyRows.Add(row);
             }
         }
-
-        // Remove excess rows (shouldn't happen unless KnownActions shrinks)
         while (HotkeyRows.Count > ActionDefs.Length)
             HotkeyRows.RemoveAt(HotkeyRows.Count - 1);
+
+        int shared = merged.Where(b => b.VirtualKey != 0)
+            .GroupBy(b => (b.VirtualKey, b.Modifiers))
+            .Count(g => g.Count() > 1);
+        var baseHint = EditingGameConfigId is null
+            ? "编辑全局默认方案；没有专属配置的游戏继承此方案。"
+            : "编辑当前游戏专属覆盖项；未修改的动作自动继承全局默认。";
+        ScopeDescription = shared == 0
+            ? baseHint + " 允许同键绑定多个动作。"
+            : baseHint + $" 目前有 {shared} 组快捷键对应多个动作（允许）。";
     }
 
     public void StartKeyCapture(HotkeyRow? row)
@@ -105,15 +143,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         if (CapturingRow == null) return;
         if (string.IsNullOrEmpty(CapturingRow.ActionName))
         {
-            Log.Warning("OnKeyCaptured: CapturingRow.ActionName is null/empty, discarding");
+            Log.Warning("OnKeyCaptured: missing ActionName");
             CancelKeyCapture();
             return;
         }
-
-        HotkeyService.SuppressAll = false;
-        _hotkeyConfigManager.SaveBinding(CapturingRow.ActionName, virtualKey, modifiers);
-        IsCapturingKey = false;
-        CapturingRow = null;
+        var row = CapturingRow;
+        CancelKeyCapture();
+        _hotkeyConfigManager.SaveBindingForScope(EditingGameConfigId, row.ActionName, virtualKey, modifiers);
     }
 
     public void CancelKeyCapture()
@@ -125,8 +161,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     private void ClearHotkey(HotkeyRow? row)
     {
-        if (row == null) return;
-        _hotkeyConfigManager.ClearBinding(row.ActionName);
+        if (row != null)
+            _hotkeyConfigManager.ClearBindingForScope(EditingGameConfigId, row.ActionName);
     }
 
     public void Dispose()
@@ -135,6 +171,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _hotkeyConfigManager.BindingsChanged -= LoadHotkeys;
     }
 }
+
+public sealed record HotkeyScopeOption(int? GameConfigId, string Name);
 
 public partial class HotkeyRow : ObservableObject
 {

@@ -83,6 +83,9 @@ public sealed partial class MainWindow : Window
         _viewModel.InitializeHotkeys();
         _viewModel.InitializeSubtitleSync();
         RestoreWindowState();
+        // Foreground detection is polled on a background thread; the hotkey
+        // profile switch belongs on the UI thread with the keyboard hook.
+        _gameDetector.ForegroundGameChanged += OnForegroundGameChanged;
         _gameDetector.Start();
 
         RegisterMessengerHandlers();
@@ -95,6 +98,14 @@ public sealed partial class MainWindow : Window
             ConnectToolbarViewModel();
         }
         catch (Exception ex) { Log.Error(ex, "Failed to create ToolbarWindow"); }
+    }
+
+    private void OnForegroundGameChanged(GameConfig? game)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _hotkeyConfigManager.SetActiveGame(game?.Id);
+        });
     }
 
     private void InitializeWindow()
@@ -534,6 +545,7 @@ public sealed partial class MainWindow : Window
         _toolbarWindow?.CloseForReal();
         _settingsWindow?.Close();
         _viewModel.Cleanup();
+        _gameDetector.ForegroundGameChanged -= OnForegroundGameChanged;
         _gameDetector.Dispose();
         _speechRecognition.StopAsync().GetAwaiter().GetResult();
         _speechRecognition.Dispose();

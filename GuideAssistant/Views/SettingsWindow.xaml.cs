@@ -1,5 +1,7 @@
 using CommunityToolkit.Mvvm.Messaging;
 using GuideAssistant.Services;
+using GuideAssistant.Data;
+using Microsoft.Extensions.DependencyInjection;
 using GuideAssistant.ViewModels;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -15,16 +17,26 @@ public sealed partial class SettingsWindow : Window
     private int? _pendingKey;
     private int _pendingModifiers;
     private int? _lastModifierKey;
+    private bool _refreshingScopes;
+    private readonly GameDetector _gameDetector;
+    private readonly GameConfigPage _gamesPage;
 
     public SettingsWindow(SettingsViewModel viewModel)
     {
         InitializeComponent();
 
         _viewModel = viewModel;
+        _gameDetector = App.Services.GetRequiredService<GameDetector>();
+        _gamesPage = new GameConfigPage(
+            App.Services.GetRequiredService<GameRepository>(),
+            _gameDetector,
+            App.Services.GetRequiredService<HotkeyConfigManager>());
+        _gamesPage.GamesChanged += GamesPage_GamesChanged;
+        GamesPage.Content = _gamesPage;
         SettingsNav.DataContext = _viewModel;
 
         SetupWindow();
-        _viewModel.LoadHotkeys();
+        RefreshHotkeyScopeOptions();
         HotkeyList.ItemsSource = _viewModel.HotkeyRows;
         LoadDisplaySettings();
         VersionText.Text = Services.VersionInfo.GetDisplayVersion();
@@ -34,6 +46,7 @@ public sealed partial class SettingsWindow : Window
         // Safety: ensure SuppressAll is cleared when window closes
         Closed += (s, e) =>
         {
+            _gamesPage.GamesChanged -= GamesPage_GamesChanged;
             _viewModel.Dispose();
         };
     }
@@ -48,7 +61,7 @@ public sealed partial class SettingsWindow : Window
         titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
         titleBar.ButtonInactiveForegroundColor = Colors.Transparent;
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 560, Height = 480 });
+        AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 660, Height = 600 });
         var presenter = AppWindow.Presenter as OverlappedPresenter;
         if (presenter != null)
         {
@@ -64,6 +77,7 @@ public sealed partial class SettingsWindow : Window
         if (args.SelectedItem is NavigationViewItem item)
         {
             HotkeysPage.Visibility = Visibility.Collapsed;
+            GamesPage.Visibility = Visibility.Collapsed;
             DisplayPage.Visibility = Visibility.Collapsed;
             AboutPage.Visibility = Visibility.Collapsed;
 
@@ -71,7 +85,12 @@ public sealed partial class SettingsWindow : Window
             {
                 case "hotkeys":
                     HotkeysPage.Visibility = Visibility.Visible;
+                    RefreshHotkeyScopeOptions();
                     _viewModel.SelectPageCommand.Execute("hotkeys");
+                    break;
+                case "games":
+                    GamesPage.Visibility = Visibility.Visible;
+                    _viewModel.SelectPageCommand.Execute("games");
                     break;
                 case "display":
                     DisplayPage.Visibility = Visibility.Visible;
@@ -83,6 +102,49 @@ public sealed partial class SettingsWindow : Window
                     break;
             }
         }
+    }
+
+    private void GamesPage_GamesChanged()
+    {
+        _gameDetector.ReloadConfigs();
+        RefreshHotkeyScopeOptions();
+    }
+
+    private void RefreshHotkeyScopeOptions()
+    {
+        _refreshingScopes = true;
+        try
+        {
+            _viewModel.RefreshScopes();
+            HotkeyScopeSelector.ItemsSource = _viewModel.HotkeyScopes;
+            HotkeyScopeSelector.SelectedItem = _viewModel.HotkeyScopes.FirstOrDefault(
+                x => x.GameConfigId == _viewModel.EditingGameConfigId);
+        }
+        finally
+        {
+            _refreshingScopes = false;
+        }
+        UpdateHotkeyScopeUi();
+    }
+
+    private void HotkeyScope_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingScopes) return;
+        var item = HotkeyScopeSelector.SelectedItem as HotkeyScopeOption;
+        _viewModel.SelectScope(item?.GameConfigId);
+        UpdateHotkeyScopeUi();
+    }
+
+    private void ResetGameHotkeys_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.ResetSelectedGameProfile();
+        UpdateHotkeyScopeUi();
+    }
+
+    private void UpdateHotkeyScopeUi()
+    {
+        ResetGameHotkeysButton.IsEnabled = _viewModel.EditingGameConfigId is not null;
+        HotkeyScopeHint.Text = _viewModel.ScopeDescription;
     }
 
     // ── Hotkeys ──────────────────────────────────────────
@@ -106,6 +168,7 @@ public sealed partial class SettingsWindow : Window
             _viewModel.OnKeyCaptured(_pendingKey.Value, _pendingModifiers);
         else
             _viewModel.CancelKeyCapture();
+        UpdateHotkeyScopeUi();
     }
 
     private void OnKeyCaptureDialogOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
@@ -148,6 +211,7 @@ public sealed partial class SettingsWindow : Window
         if (sender is Button btn && btn.DataContext is HotkeyRow row)
         {
             _viewModel.ClearHotkeyCommand.Execute(row);
+            UpdateHotkeyScopeUi();
         }
     }
 
