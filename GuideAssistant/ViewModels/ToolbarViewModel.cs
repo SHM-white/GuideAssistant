@@ -118,8 +118,9 @@ public partial class ToolbarViewModel : ObservableObject
     private void CloseTabItem(TabItem? tab)
     {
         if (tab == null) return;
-        _tabManager.CloseTab(tab.Id);
+        // Detach the WebView from its host before the cache is evicted.
         CloseTabRequested?.Invoke(tab.Id);
+        _tabManager.CloseTab(tab.Id);
         if (_tabManager.ActiveTab != null) SelectTab(_tabManager.ActiveTab);
     }
 
