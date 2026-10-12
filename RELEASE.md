@@ -102,6 +102,12 @@ Release 另附 `SHA256SUMS.txt` 记录三个 ZIP 的 SHA256。可以在 PowerShe
 
 根据目标 Windows 设备的架构选择 ZIP。每个 ZIP 都包含完整的侧载目录和 `Add-AppDevPackage.ps1`。解压后按侧载目录中的脚本安装。工作流只发布已签名的包，不能依赖无签名包安装。
 
+## 发布工作流的 master 冒烟测试
+
+直接提交 `.github/workflows/release-msix.yml` 到 `master` 会触发一次签名 MSIX 冒烟构建，检查 x86/x64/ARM64 打包流程并上传 Actions artifacts，但**不会创建或更新正式 Release**。后续普通代码提交不触发此高成本工作流。原有标签发布及手动指定标签发布的入口保持不变。
+
+CI Runner 不会为自签名发布证书增加 Root 信任：之前这一操作可能弹出无人值守环境无法确认的安全提示，造成构建长时间卡住。对自签名证书，工作流检查 MSIX 签名者指纹与本次 PFX 一致，并区分 `NotTrusted` 和签名损坏或缺失。允许 `NotTrusted` 通过只表示开发者侧载包来自所配置的证书，**不是公开 CA 信任或真实安装成功的保证**。使用者仍应按上面的说明确认发布者并在设备上建立证书信任。
+
 ## 重跑和更新已有发布
 
 标签对应的工作流失败时，若已经修复了 workflow YAML，**不要直接对旧运行点击 Re-run jobs**：旧运行可能仍采用旧版本工作流，导致同样的错误。应先把修复 PR 合并到 master，再打开 **Actions > Release MSIX > Run workflow**，分支选 **master**，`tag` 填现有标签（例如 `v1.3.0`），启动**全新**运行。无需删除或重建原有 tag；工作流会从该 tag 检出应用源代码，但执行最新 master 上的工作流步骤。

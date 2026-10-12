@@ -2,8 +2,12 @@ name: Release MSIX
 
 on:
   push:
+    branches: [master]
     tags:
       - 'v*'
+    # Only workflow edits trigger branch smoke tests. Path filters are ignored for tags.
+    paths:
+      - '.github/workflows/release-msix.yml'
   workflow_dispatch:
     inputs:
       tag:
@@ -33,7 +37,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          if [[ "$GITHUB_REF_TYPE" == "branch" ]]; then
+            echo 'Smoke test on master: signed MSIX build only; no Release.'
+          elif [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo '::error::Tag must match vMAJOR.MINOR.PATCH.'
             exit 1
           fi
@@ -42,7 +48,7 @@ jobs:
             exit 1
           fi
           # Avoid starting three Windows jobs for an absent release tag.
-          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+          if [[ "$GITHUB_REF_TYPE" != "branch" ]] && ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
             echo "::error::Release tag '${RELEASE_TAG}' does not exist."
             exit 1
           fi
@@ -64,12 +70,17 @@ jobs:
             echo "::error::The release tag must reference a commit merged into master."
             exit 1
           fi
-          python scripts/verify_release_version.py --tag "$RELEASE_TAG"
+          if [[ "$GITHUB_REF_TYPE" == "branch" ]]; then
+            python scripts/verify_release_version.py
+          else
+            python scripts/verify_release_version.py --tag "$RELEASE_TAG"
+          fi
 
   build:
     needs: preflight
     name: Build ${{ matrix.architecture }} MSIX
     runs-on: windows-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -102,7 +113,19 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          # On master pushes use the project version for filenames, not "master".
           $tag = $env:REQUESTED_TAG.Trim()
+          if ($env:GITHUB_REF_TYPE -eq 'branch') {
+            $projectFile = Join-Path $env:GITHUB_WORKSPACE 'GuideAssistant\GuideAssistant.csproj'
+            [xml]$projectXml = Get-Content -LiteralPath $projectFile
+            $projectVersion = @($projectXml.Project.PropertyGroup | ForEach-Object { $_.Version } |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)[0]
+            if ([string]::IsNullOrWhiteSpace($projectVersion)) {
+              throw 'Missing project version for master packaging smoke test.'
+            }
+            $tag = "v$projectVersion"
+            Write-Host "Packaging smoke test for $tag. This run cannot publish a Release."
+          }
           if ($tag -match '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
             $major = [int]$Matches[1]
             $minor = [int]$Matches[2]
@@ -117,10 +140,12 @@ jobs:
             }
           }
 
-          git fetch --force --tags origin
-          $null = git rev-parse --verify --quiet "refs/tags/$tag^{commit}"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Tag '$tag' does not exist in this repository."
+          if ($env:GITHUB_REF_TYPE -ne 'branch') {
+            git fetch --force --tags origin
+            $null = git rev-parse --verify --quiet "refs/tags/$tag^{commit}"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Tag '$tag' does not exist in this repository."
+            }
           }
 
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -155,7 +180,7 @@ jobs:
           "MANIFEST_PATH=$manifestPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MANIFEST_PUBLISHER=$publisher" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Import signing certificate
+      - name: Import signing certificate (no Root trust)
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
@@ -189,14 +214,11 @@ jobs:
             throw "Certificate Subject '$($signingCertificate.Subject)' does not exactly match manifest Publisher '$env:MANIFEST_PUBLISHER'."
           }
 
-          # Let signtool verify a self-signed certificate on this ephemeral runner.
+          # Writing a self-signed certificate to Root can show an interactive
+          # trust prompt and hang a headless runner (the previous run hit 6 hours).
+          # We verify the signature and exact signer instead, without adding a root.
           if ($signingCertificate.Subject -eq $signingCertificate.Issuer) {
-            $cerPath = Join-Path $env:RUNNER_TEMP 'windows-signing-certificate.cer'
-            Export-Certificate -Cert $signingCertificate -FilePath $cerPath | Out-Null
-            Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
-            Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-            "CERT_TRUST_THUMBPRINT_TO_CLEAN=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            "CER_PATH=$cerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host 'Self-signed publisher: do not elevate trust to a root CA in CI.'
           }
 
           "CERT_THUMBPRINT=$($signingCertificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -284,10 +306,29 @@ jobs:
           }
 
           $signtoolPath = $signTools[0].FullName
-          & $signtoolPath verify /pa /all /v $mainPackagePath
-          if ($LASTEXITCODE -ne 0) {
-            throw "signtool signature verification failed with exit code $LASTEXITCODE."
+          # The signed package is not a trusted publisher on a clean runner.
+          # Distinguish this expected self-signed trust failure from a bad hash,
+          # missing signature or unexpected signing identity.
+          $signature = Get-AuthenticodeSignature -LiteralPath $mainPackagePath
+          if ($null -eq $signature.SignerCertificate) {
+            throw "MSIX has no readable signing certificate (status: $($signature.Status))."
           }
+          if ($signature.SignerCertificate.Thumbprint -ne $env:CERT_THUMBPRINT) {
+            throw 'MSIX signer thumbprint differs from the PFX imported for this build.'
+          }
+          if ($signature.Status -eq 'Valid') {
+            Write-Host 'MSIX Authenticode signature is valid and trusted.'
+            & $signtoolPath verify /pa /all /v $mainPackagePath
+            if ($LASTEXITCODE -ne 0) {
+              throw "Trusted SignTool verification failed (code $LASTEXITCODE)."
+            }
+          } elseif ($signature.Status -eq 'NotTrusted' -and
+                    $signature.SignerCertificate.Subject -eq $signature.SignerCertificate.Issuer) {
+            Write-Warning 'Expected: MSIX cryptographic signer matches this build, but its self-signed publisher is untrusted on the clean CI runner. Recipients must trust the certificate before installing.'
+          } else {
+            throw "MSIX signature verification failed: $($signature.Status). $($signature.StatusMessage)"
+          }
+          Write-Host "Signature status=$($signature.Status); signer=$($signature.SignerCertificate.Thumbprint)"
 
           $assetDir = Join-Path $env:GITHUB_WORKSPACE 'artifacts\release'
           New-Item -ItemType Directory -Path $assetDir -Force | Out-Null
@@ -324,24 +365,14 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($env:PFX_PATH) -and (Test-Path -LiteralPath $env:PFX_PATH)) {
             Remove-Item -LiteralPath $env:PFX_PATH -Force
           }
-          if (-not [string]::IsNullOrWhiteSpace($env:CERT_TRUST_THUMBPRINT_TO_CLEAN)) {
-            $trustedCertPath = "Cert:\CurrentUser\TrustedPeople\$env:CERT_TRUST_THUMBPRINT_TO_CLEAN"
-            if (Test-Path -LiteralPath $trustedCertPath) {
-              Remove-Item -LiteralPath $trustedCertPath -Force
-            }
-            $trustedRootCertPath = "Cert:\CurrentUser\Root\$env:CERT_TRUST_THUMBPRINT_TO_CLEAN"
-            if (Test-Path -LiteralPath $trustedRootCertPath) {
-              Remove-Item -LiteralPath $trustedRootCertPath -Force
-            }
-          }
-          if (-not [string]::IsNullOrWhiteSpace($env:CER_PATH) -and (Test-Path -LiteralPath $env:CER_PATH)) {
-            Remove-Item -LiteralPath $env:CER_PATH -Force
-          }
+          # No trust anchors were added by this job.
 
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
     needs: build
+    # Master smoke runs must never create or change a GitHub Release.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.ref_type == 'tag' }}
     permissions:
       contents: write
     steps:
