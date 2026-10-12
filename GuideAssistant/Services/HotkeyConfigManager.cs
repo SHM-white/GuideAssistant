@@ -5,169 +5,175 @@ using Serilog;
 namespace GuideAssistant.Services;
 
 /// <summary>
-/// Single source of truth for hotkey configuration.
-/// Centralizes the merge of DB-stored overrides with built-in defaults from
-/// <see cref="HotkeyService.KnownActions"/>, provides cached lookups for the
-/// settings UI, and notifies consumers when bindings change.
+/// Global hotkeys are the fallback. Per-game profiles store only overrides,
+/// including explicit unbound keys. Switching the active foreground game
+/// never mutates the configuration currently being edited in Settings.
 /// </summary>
-public class HotkeyConfigManager
+public sealed class HotkeyConfigManager
 {
     private readonly HotkeyRepository _repo;
-    private volatile List<HotkeyBinding> _mergedBindings = new();
+    private readonly GameRepository _games;
+    private readonly object _gate = new();
+    private List<HotkeyBinding> _activeBindings = new();
     private int _defaultProfileId;
-    private readonly object _lock = new();
+    private int? _activeGameConfigId;
 
-    /// <summary>Fired after bindings are reloaded (save, clear, or explicit refresh).</summary>
     public event Action? BindingsChanged;
 
-    public HotkeyConfigManager(HotkeyRepository repo)
+    public HotkeyConfigManager(HotkeyRepository repo, GameRepository games)
     {
         _repo = repo;
+        _games = games;
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Public API
-    // ═══════════════════════════════════════════════════════════
+    public int? ActiveGameConfigId
+    {
+        get { lock (_gate) return _activeGameConfigId; }
+    }
 
-    /// <summary>
-    /// Get the merged binding list (DB overrides + <see cref="HotkeyService.KnownActions"/> fallback).
-    /// Returns a defensive copy so callers cannot mutate the cached list.
-    /// </summary>
     public List<HotkeyBinding> GetMergedBindings()
     {
-        lock (_lock)
+        lock (_gate)
         {
-            if (_mergedBindings.Count == 0)
-                RefreshBindingsLocked();
-            return new List<HotkeyBinding>(_mergedBindings);
+            if (_activeBindings.Count == 0) RebuildLocked();
+            return HotkeyProfileMerger.Merge(_activeBindings, null);
         }
     }
 
-    /// <summary>Force reload from DB and notify <see cref="BindingsChanged"/>.</summary>
+    public List<HotkeyBinding> GetBindingsForScope(int? gameConfigId)
+    {
+        lock (_gate)
+            return BuildScopeBindingsLocked(gameConfigId);
+    }
+
+    /// <summary>Only the foreground game gets its overrides; null restores global defaults.</summary>
+    public void SetActiveGame(int? gameConfigId)
+    {
+        bool changed;
+        lock (_gate)
+        {
+            changed = _activeGameConfigId != gameConfigId;
+            if (changed)
+            {
+                _activeGameConfigId = gameConfigId;
+                RebuildLocked();
+            }
+        }
+        if (changed)
+        {
+            Log.Information("Switched active hotkey profile to game config {GameId}", gameConfigId);
+            BindingsChanged?.Invoke();
+        }
+    }
+
     public void RefreshAndNotify()
     {
-        lock (_lock)
-        {
-            RefreshBindingsLocked();
-        }
+        lock (_gate) RebuildLocked();
         BindingsChanged?.Invoke();
     }
 
-    /// <summary>Force reload from DB without firing the event.</summary>
     public void Refresh()
     {
-        lock (_lock)
-        {
-            RefreshBindingsLocked();
-        }
+        lock (_gate) RebuildLocked();
     }
 
+    /// <summary>Legacy API: edits the global profile, never the foreground game.</summary>
     public void SaveBinding(string actionName, int virtualKey, int modifiers = 0)
-    {
-        if (string.IsNullOrEmpty(actionName))
-        {
-            Log.Warning("SaveBinding called with null/empty actionName, ignored");
-            return;
-        }
+        => SaveBindingForScope(null, actionName, virtualKey, modifiers);
 
-        if (_defaultProfileId == 0) EnsureDefaultProfile();
-        var def = HotkeyService.KnownActions.FirstOrDefault(a => a.ActionName == actionName);
+    public void ClearBinding(string actionName) => ClearBindingForScope(null, actionName);
+
+    public void SaveBindingForScope(int? gameConfigId, string actionName, int virtualKey, int modifiers = 0)
+    {
+        var def = HotkeyService.KnownActions.FirstOrDefault(x => x.ActionName == actionName);
         if (def.ActionName == null)
         {
-            Log.Warning("SaveBinding: unknown actionName '{ActionName}', ignored", actionName);
+            Log.Warning("Unknown hotkey action ignored: {Action}", actionName);
             return;
         }
 
-        _repo.SaveBinding(_defaultProfileId, actionName, def.DisplayName, virtualKey,
-            HotkeyService.FormatBinding(virtualKey, modifiers), modifiers & HotkeyService.ModifierMask);
-        Log.Information("Hotkey saved via ConfigManager: {Action} => VK {Key}", actionName, virtualKey);
+        int profileId;
+        if (gameConfigId is int id)
+        {
+            var game = _games.GetAll().FirstOrDefault(g => g.Id == id);
+            if (game == null)
+                throw new InvalidOperationException("The selected game no longer exists.");
+            profileId = _repo.GetOrCreateGameProfile(id, game.GameName).Id;
+        }
+        else
+        {
+            profileId = EnsureDefaultProfile();
+        }
+
+        modifiers &= HotkeyService.ModifierMask;
+        _repo.SaveBinding(profileId, actionName, def.DisplayName, virtualKey,
+            HotkeyService.FormatBinding(virtualKey, modifiers), modifiers);
         RefreshAndNotify();
     }
 
-    public void ClearBinding(string actionName)
+    public void ClearBindingForScope(int? gameConfigId, string actionName)
+        => SaveBindingForScope(gameConfigId, actionName, 0);
+
+    public void ResetGameProfile(int gameConfigId)
     {
-        if (_defaultProfileId == 0) EnsureDefaultProfile();
-        // An explicit unbound binding must not fall back to the default.
-        var def = HotkeyService.KnownActions.FirstOrDefault(a => a.ActionName == actionName);
-        if (def.ActionName == null) return;
-        _repo.SaveBinding(_defaultProfileId, actionName, def.DisplayName, 0, "未绑定");
-        Log.Information("Hotkey disabled via ConfigManager: {Action}", actionName);
+        _repo.DeleteGameProfile(gameConfigId);
         RefreshAndNotify();
     }
 
-    /// <summary>
-    /// Ensure a default profile exists in DB, seeded from
-    /// <see cref="HotkeyService.KnownActions"/>. Returns the profile id.
-    /// </summary>
     public int EnsureDefaultProfile()
     {
-        var profile = _repo.GetDefaultProfile();
-        if (profile == null)
+        lock (_gate)
         {
-            profile = new HotkeyProfile { Name = "默认方案", IsDefault = true };
-            profile.Id = _repo.AddProfile(profile);
-        }
-
-        // Remove stale bindings from in-memory list and DB
-        var staleCount = profile.Bindings.RemoveAll(b => string.IsNullOrEmpty(b.ActionName));
-        if (staleCount > 0)
-        {
-            Log.Warning("HotkeyConfigManager: removed {Count} stale bindings with empty ActionName", staleCount);
-            // Also clean DB of empty-action rows so SaveBindings won't trip UNIQUE
-            _repo.ClearBinding(profile.Id, "");
-        }
-
-        bool needsSave = false;
-        foreach (var known in HotkeyService.KnownActions)
-        {
-            var binding = profile.Bindings.FirstOrDefault(b => b.ActionName == known.ActionName);
-            if (binding == null)
+            var profile = _repo.GetDefaultProfile();
+            if (profile == null)
             {
+                profile = new HotkeyProfile { Name = "默认方案", IsDefault = true };
+                profile.Id = _repo.AddProfile(profile);
+            }
+            // Default bindings are seeded once; never replace an explicit VK=0.
+            bool needsSave = false;
+            foreach (var known in HotkeyService.KnownActions)
+            {
+                if (profile.Bindings.Any(x => x.ActionName == known.ActionName)) continue;
                 profile.Bindings.Add(new HotkeyBinding
                 {
                     ActionName = known.ActionName,
                     ActionDisplay = known.DisplayName,
                     VirtualKey = known.DefaultVk,
-                    DisplayText = HotkeyService.VirtualKeyToDisplayName(known.DefaultVk),
+                    DisplayText = HotkeyService.VirtualKeyToDisplayName(known.DefaultVk)
                 });
                 needsSave = true;
             }
-            // VirtualKey == 0 explicitly disables a binding.
+            if (needsSave) _repo.SaveBindings(profile.Id, profile.Bindings);
+            _defaultProfileId = profile.Id;
+            return profile.Id;
         }
-
-        if (needsSave)
-            _repo.SaveBindings(profile.Id, profile.Bindings);
-
-        _defaultProfileId = profile.Id;
-        return profile.Id;
     }
 
-    // ═══════════════════════════════════════════════════════════
-    //  Internals
-    // ═══════════════════════════════════════════════════════════
+    private void RebuildLocked() => _activeBindings = BuildScopeBindingsLocked(_activeGameConfigId);
 
-    private void RefreshBindingsLocked()
+    private List<HotkeyBinding> BuildScopeBindingsLocked(int? gameConfigId)
     {
         var profile = _repo.GetDefaultProfile();
         var dbBindings = profile?.Bindings
-            ?.Where(b => !string.IsNullOrEmpty(b.ActionName))
-            .ToDictionary(b => b.ActionName)
+            .Where(x => !string.IsNullOrWhiteSpace(x.ActionName))
+            .ToDictionary(x => x.ActionName, StringComparer.Ordinal)
             ?? new Dictionary<string, HotkeyBinding>(StringComparer.Ordinal);
+        var global = HotkeyService.KnownActions.Select(known =>
+            dbBindings.TryGetValue(known.ActionName, out var b)
+                ? b
+                : new HotkeyBinding
+                {
+                    ActionName = known.ActionName,
+                    ActionDisplay = known.DisplayName,
+                    VirtualKey = known.DefaultVk,
+                    DisplayText = HotkeyService.VirtualKeyToDisplayName(known.DefaultVk)
+                }).ToList();
 
-        _mergedBindings = HotkeyService.KnownActions.Select(known =>
-        {
-            if (dbBindings.TryGetValue(known.ActionName, out var db))
-            {
-                db.DisplayText = HotkeyService.FormatBinding(db.VirtualKey, db.Modifiers);
-                return db;
-            }
-            return new HotkeyBinding
-            {
-                ActionName = known.ActionName,
-                ActionDisplay = known.DisplayName,
-                VirtualKey = known.DefaultVk,
-                DisplayText = HotkeyService.VirtualKeyToDisplayName(known.DefaultVk),
-            };
-        }).ToList();
+        var overrides = gameConfigId is int id ? _repo.GetGameProfile(id)?.Bindings : null;
+        var merged = HotkeyProfileMerger.Merge(global, overrides);
+        foreach (var b in merged)
+            b.DisplayText = HotkeyService.FormatBinding(b.VirtualKey, b.Modifiers);
+        return merged;
     }
 }
