@@ -24,7 +24,6 @@ public class BilibiliCcProvider : ISubtitleProvider, IDisposable
     public event Action<string>? SubtitleChanged;
     public event Action<string>? DirectionWordDetected;
 
-    private static readonly string[] s_directionWords = DirectionWords.All;
 
     public BilibiliCcProvider(BilibiliApi bilibiliApi)
     {
@@ -96,18 +95,11 @@ public class BilibiliCcProvider : ISubtitleProvider, IDisposable
         }
     }
 
+    // Emit the whole caption, never an isolated word without map/camera context.
     private void CheckDirectionWords(string text)
     {
-        if (string.IsNullOrEmpty(text)) return;
-
-        foreach (var word in s_directionWords)
-        {
-            if (text.Contains(word))
-            {
-                DirectionWordDetected?.Invoke(word);
-                return;
-            }
-        }
+        if (!string.IsNullOrWhiteSpace(text))
+            DirectionWordDetected?.Invoke(text);
     }
 
     public void Dispose()

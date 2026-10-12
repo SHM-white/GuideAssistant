@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../GuideAssistant/Services/HotkeyPressTracker.cs" Link="HotkeyPressTracker.cs" />
+    <Compile Include="../../GuideAssistant/Services/DirectionWords.cs" Link="DirectionWords.cs" />
+    <Compile Include="../../GuideAssistant/Services/DirectionService.cs" Link="DirectionService.cs" />
     <Compile Include="../../GuideAssistant/Services/HotkeyProfileMerger.cs" Link="HotkeyProfileMerger.cs" />
     <Compile Include="../../GuideAssistant/Models/HotkeyProfile.cs" Link="HotkeyProfile.cs" />
   </ItemGroup>
