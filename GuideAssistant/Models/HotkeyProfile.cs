@@ -4,7 +4,10 @@ public class HotkeyProfile
 {
     public int Id { get; set; }
     public string Name { get; set; } = "默认方案";
+    // Legacy GameId refers to the older games table. New per-game hotkeys
+    // reference game_configs through a separate column.
     public int? GameId { get; set; }
+    public int? GameConfigId { get; set; }
     public bool IsDefault { get; set; }
     public List<HotkeyBinding> Bindings { get; set; } = new();
 }
