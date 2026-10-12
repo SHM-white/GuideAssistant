@@ -28,6 +28,10 @@ jobs:
         shell: pwsh
         run: python scripts/verify_release_version.py
 
+      - name: Run platform-independent hotkey regression tests
+        shell: pwsh
+        run: dotnet run --project tests/GuideAssistant.LogicTests -c Release
+
       - name: Restore and compile
         shell: pwsh
         run: |
