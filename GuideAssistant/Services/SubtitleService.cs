@@ -18,7 +18,6 @@ public class SubtitleService
     public event Action<string>? SubtitleChanged;
     public event Action<string>? DirectionWordDetected;
 
-    private static readonly string[] s_directionWords = DirectionWords.All;
     /// <summary>Stores the most recent subtitle text from the active provider callback.</summary>
     private volatile string _lastProviderSubtitleText = "";
 
@@ -224,11 +223,10 @@ public class SubtitleService
             _lastProviderSubtitleText = text;
             SubtitleChanged?.Invoke(text);
         };
-        Action<string> directionHandler = word =>
+        Action<string> directionHandler = text =>
         {
             if (!ReferenceEquals(_activeProvider, provider) || !IsCurrentSession(generation, bvid)) return;
-            if (ShouldFireDirection(word, _lastProviderSubtitleText))
-                DirectionWordDetected?.Invoke(word);
+            EmitDirection(text);
         };
 
         _activeProvider = provider;
@@ -280,36 +278,14 @@ public class SubtitleService
         }
     }
 
-    private void CheckDirectionWords(string text)
+    // All subtitle providers pass complete captions. Context is required to tell
+    // map positions apart from camera-relative movement instructions.
+    private void CheckDirectionWords(string text) => EmitDirection(text);
+
+    private void EmitDirection(string text)
     {
-        if (string.IsNullOrEmpty(text)) return;
-
-        foreach (var word in s_directionWords)
-        {
-            if (text.Contains(word))
-            {
-                if (ShouldFireDirection(word, text))
-                    DirectionWordDetected?.Invoke(word);
-                return;
-            }
-        }
-    }
-
-    /// <summary>Returns true if a direction arrow should be shown for <paramref name="fullText"/>.</summary>
-    private bool ShouldFireDirection(string word, string fullText)
-    {
-        if (string.IsNullOrEmpty(fullText)) return false;
-
-        if (MinimapFilterEnabled)
-        {
-            // Filter ON: suppress 大地图, require 小地图/地图
-            if (fullText.Contains("大地图"))
-                return false;
-            return fullText.Contains("小地图") || fullText.Contains("地图");
-        }
-
-        // Filter OFF: show all direction keywords (user override for 大地图 etc.)
-        return true;
+        if (DirectionWords.TryResolve(text, MinimapFilterEnabled) != null)
+            DirectionWordDetected?.Invoke(text);
     }
 
     /// <summary>Replace current provider with intercepted subtitle data (fetched from WebView2 fetch interceptor).</summary>
@@ -422,17 +398,3 @@ public class SubtitleService
     }
 }
 
-public class DirectionService
-{
-    public static (double angle, string label)? ParseDirection(string text)
-    {
-        // Use shared AngleMap — longest-keyword-first to ensure compound
-        // terms (西南方向) match before shorter substrings (西).
-        foreach (var kvp in DirectionWords.AngleMap)
-        {
-            if (text.Contains(kvp.Key))
-                return kvp.Value;
-        }
-        return null;
-    }
-}

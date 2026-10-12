@@ -50,3 +50,35 @@ var duplicates = HotkeyProfileMerger.Merge(defaults, duplicateOverrides);
 Expect(duplicates[0].VirtualKey == duplicates[1].VirtualKey, true,
     "multiple actions may deliberately share a hotkey");
 Console.WriteLine("Game-specific hotkey profile tests passed.");
+
+static void DirectionTest(string text, bool filter, double? expectedAngle, DirectionReference? expectedReference, string description)
+{
+    var match = DirectionWords.TryResolve(text, filter);
+    Expect(match.HasValue, expectedAngle.HasValue, description + " exists");
+    if (match is { } value)
+    {
+        Expect(Math.Abs(value.Angle - expectedAngle!.Value) < 0.001, true, description + " angle");
+        Expect(value.Reference == expectedReference, true, description + " reference");
+    }
+}
+
+DirectionTest("敌人在东北方向", false, 45, DirectionReference.Compass, "compass northeast");
+DirectionTest("往西边走", false, 270, DirectionReference.Compass, "compass west");
+DirectionTest("小地图左上角有入口", true, 315, DirectionReference.Map, "small map corner");
+DirectionTest("地图的右侧有标记", true, 90, DirectionReference.Map, "explicit map right");
+DirectionTest("在地图上方", true, 0, DirectionReference.Map, "map top");
+DirectionTest("去北方", true, null, null, "filter requires map mention");
+DirectionTest("大地图西北方向", true, null, null, "big map suppressed by filter");
+DirectionTest("大地图西北方向", false, 315, DirectionReference.Compass, "big map override");
+DirectionTest("敌人在我的正前方", false, null, null, "forward is not north");
+DirectionTest("小地图上敌人在我的左前方", true, null, null, "camera-relative left forward not northwest");
+DirectionTest("地图在面前", false, null, null, "facing is not north");
+DirectionTest("往前走，随后向右", false, null, null, "movement is not a map bearing");
+DirectionTest("地图右上角", false, 45, DirectionReference.Map, "disabled filter still resolves map");
+DirectionTest("地图右上角", true, 45, DirectionReference.Map, "map corner prioritized over shorter right");
+DirectionTest("东西都可以", false, null, null, "single cardinal characters do not match ordinary words");
+DirectionTest("北", false, 0, DirectionReference.Compass, "single explicit compass word");
+DirectionTest("", false, null, null, "empty caption");
+Expect(DirectionService.ParseDirection("正前方") == null, true, "overlay refuses camera-relative headings");
+Expect(DirectionService.ParseDirection("地图左下角")?.angle == 225, true, "overlay uses shared map resolver");
+Console.WriteLine("Direction reference and minimap filtering tests passed.");
