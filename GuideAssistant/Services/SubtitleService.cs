@@ -185,6 +185,35 @@ public class SubtitleService
         }
     }
 
+    /// <summary>
+    /// Invalidate pending loads and detach caption/audio sources when the
+    /// active page is no longer a supported video.
+    /// </summary>
+    public async Task StopSessionAsync()
+    {
+        var generation = System.Threading.Interlocked.Increment(ref _subtitleSessionGeneration);
+        _currentBvid = null;
+        DetachActiveSpeechRecognition();
+
+        try
+        {
+            await StopActiveProvider();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "SubtitleService: failed to stop active provider");
+        }
+        await StopSpeechRecognitionAsync();
+
+        // Do not clear captions that a newer session has already rendered.
+        if (generation == System.Threading.Volatile.Read(ref _subtitleSessionGeneration))
+        {
+            _currentTime = 0;
+            _lastProviderSubtitleText = "";
+            SubtitleChanged?.Invoke("");
+        }
+    }
+
     private bool IsCurrentSession(long generation, string bvid) => _subtitleSessionGeneration == generation && string.Equals(_currentBvid, bvid, StringComparison.Ordinal);
 
     private void ActivateProvider(ISubtitleProvider provider, long generation, string bvid)
