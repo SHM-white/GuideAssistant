@@ -14,7 +14,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TextBlock Text="游戏辅助器配置" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <TextBlock Text="游戏管理（自动检测与专属快捷键）" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12" />
 
         <!-- Game list -->
         <ListView x:Name="GameList" Grid.Row="1" SelectionMode="Single">
