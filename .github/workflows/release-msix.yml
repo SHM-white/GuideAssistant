@@ -316,17 +316,61 @@ jobs:
           if ($signature.SignerCertificate.Thumbprint -ne $env:CERT_THUMBPRINT) {
             throw 'MSIX signer thumbprint differs from the PFX imported for this build.'
           }
+          # The self-signed publisher returns UnknownError with CERT_E_UNTRUSTEDROOT
+          # on Windows Server runners (not always the NotTrusted enum). Never
+          # accept unrelated UnknownError statuses, mismatched signer or hash errors.
+          $untrustedSelfSignedRoot = ($signature.Status -in @('NotTrusted', 'UnknownError')) -and
+            ($signature.StatusMessage -match '(?i)root\s+certificate\s+which\s+is\s+not\s+trusted|0x800B0109') -and
+            ($signature.SignerCertificate.Subject -eq $signature.SignerCertificate.Issuer)
+
+          if ($signature.Status -ne 'Valid' -and -not $untrustedSelfSignedRoot) {
+            throw "MSIX Authenticode signature invalid: $($signature.Status). $($signature.StatusMessage)"
+          }
+
+          # Independently check the embedded CMS signature without trusting its
+          # certificate chain. AppxSignature.p7x begins with the four-byte PKCX
+          # header, followed by DER PKCS#7 SignedData.
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.ZipFile
+          Add-Type -AssemblyName System.Security.Cryptography.Pkcs
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($mainPackagePath)
+          try {
+            $entry = $archive.GetEntry('AppxSignature.p7x')
+            if ($null -eq $entry) { throw 'MSIX is missing AppxSignature.p7x.' }
+            $entryStream = $entry.Open()
+            $memory = [System.IO.MemoryStream]::new()
+            try {
+              $entryStream.CopyTo($memory)
+              $p7x = $memory.ToArray()
+            } finally {
+              $entryStream.Dispose()
+              $memory.Dispose()
+            }
+          } finally {
+            $archive.Dispose()
+          }
+          if ($p7x.Length -le 4 -or [Text.Encoding]::ASCII.GetString($p7x, 0, 4) -ne 'PKCX') {
+            throw 'MSIX signature header is missing or invalid.'
+          }
+          $der = New-Object byte[] ($p7x.Length - 4)
+          [Array]::Copy($p7x, 4, $der, 0, $der.Length)
+          $signedCms = [System.Security.Cryptography.Pkcs.SignedCms]::new()
+          $signedCms.Decode($der)
+          $signedCms.CheckSignature($true)
+          if ($signedCms.SignerInfos.Count -ne 1 -or
+              $null -eq $signedCms.SignerInfos[0].Certificate -or
+              $signedCms.SignerInfos[0].Certificate.Thumbprint -ne $env:CERT_THUMBPRINT) {
+            throw 'MSIX PKCS#7 signer does not match the imported build certificate.'
+          }
+          Write-Host 'MSIX embedded PKCS#7 cryptographic signature passed, and its signer matches the PFX.'
+
           if ($signature.Status -eq 'Valid') {
-            Write-Host 'MSIX Authenticode signature is valid and trusted.'
             & $signtoolPath verify /pa /all /v $mainPackagePath
             if ($LASTEXITCODE -ne 0) {
               throw "Trusted SignTool verification failed (code $LASTEXITCODE)."
             }
-          } elseif ($signature.Status -eq 'NotTrusted' -and
-                    $signature.SignerCertificate.Subject -eq $signature.SignerCertificate.Issuer) {
-            Write-Warning 'Expected: MSIX cryptographic signer matches this build, but its self-signed publisher is untrusted on the clean CI runner. Recipients must trust the certificate before installing.'
           } else {
-            throw "MSIX signature verification failed: $($signature.Status). $($signature.StatusMessage)"
+            Write-Warning 'Expected self-signed untrusted-root status. The signed package is NOT automatically trusted on users devices; install only after explicit certificate trust.'
           }
           Write-Host "Signature status=$($signature.Status); signer=$($signature.SignerCertificate.Thumbprint)"
 
