@@ -6,16 +6,13 @@ namespace GuideAssistant.Services;
 
 public class HotkeyService : IDisposable
 {
-    private readonly Dictionary<(int Vk, int Modifiers), List<(string action, Action callback)>> _bindings = new();
+    // Replace binding snapshots atomically while the keyboard hook is active.
+    private volatile Dictionary<(int Vk, int Modifiers), List<(string action, Action callback)>> _bindings = new();
+    private readonly HotkeyPressTracker _pressedKeys = new();
     private IntPtr _hookId = IntPtr.Zero;
     private LowLevelKeyboardProc? _proc;
     private GCHandle _gcHandle;
     private bool _disposed;
-
-    /// <summary>Anti-duplicate: tracks last trigger time (ms) per virtual key to prevent
-    /// the low-level hook from firing the same action multiple times in quick succession.</summary>
-    private readonly Dictionary<(int Vk, int Modifiers), long> _lastTriggerTick = new();
-    private const long DedupWindowMs = 300;
 
     /// <summary>Set to true during key-rebind capture to suppress all hotkey actions.</summary>
     public static bool SuppressAll { get; set; }
@@ -33,21 +30,23 @@ public class HotkeyService : IDisposable
     /// </summary>
     public void SetBindings(IEnumerable<HotkeyBinding> bindings)
     {
-        _bindings.Clear();
+        var updated = new Dictionary<(int Vk, int Modifiers), List<(string action, Action callback)>>();
         foreach (var b in bindings)
         {
             if (b.VirtualKey == 0) continue;
             var chord = (b.VirtualKey, b.Modifiers & ModifierMask);
-            if (!_bindings.TryGetValue(chord, out var list))
+            if (!updated.TryGetValue(chord, out var list))
             {
                 list = new List<(string, Action)>();
-                _bindings[chord] = list;
+                updated[chord] = list;
             }
+            // Multiple actions on a single chord are intentional.
             list.Add((b.ActionName, () => HotkeyTriggered?.Invoke(b.ActionName)));
         }
+        _bindings = updated;
         Log.Information("Hotkey bindings updated: {Count} keys, total {Total} actions, keys=[{Keys}]",
-            _bindings.Count, _bindings.Values.Sum(v => v.Count),
-            string.Join(",", _bindings.Keys.Select(k => $"0x{k.Vk:X}/0x{k.Modifiers:X}")));
+            updated.Count, updated.Values.Sum(v => v.Count),
+            string.Join(",", updated.Keys.Select(k => $"0x{k.Vk:X}/0x{k.Modifiers:X}")));
     }
 
     /// <summary>
@@ -86,58 +85,55 @@ public class HotkeyService : IDisposable
         }
         if (_gcHandle.IsAllocated)
             _gcHandle.Free();
+        _pressedKeys.Reset();
     }
 
     private IntPtr OnLowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN))
+        if (nCode < 0)
+            return CallNextHookEx(_hookId, nCode, wParam, lParam);
+
+        try
         {
-            int vkCode = Marshal.ReadInt32(lParam);
-
-            if (SuppressAll)
+            if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
             {
-                // During key-rebind capture, suppress all hotkey actions but
-                // still pass the key through so the SettingsWindow can capture it.
-                return CallNextHookEx(_hookId, nCode, wParam, lParam);
+                _pressedKeys.OnKeyUp(Marshal.ReadInt32(lParam));
             }
-
-            int modifiers = ReadCurrentModifiers() & ~ModifierForKey(vkCode);
-            // Intentionally allow several actions to share the same full chord.
-            if (_bindings.TryGetValue((vkCode, modifiers), out var entries))
+            else if (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)
             {
-                if (!TryAcquireTriggerSlot((vkCode, modifiers)))
-                    return CallNextHookEx(_hookId, nCode, wParam, lParam);
-
-                foreach (var entry in entries)
+                int vkCode = Marshal.ReadInt32(lParam);
+                // Ignore OS auto-repeat, not a quick second physical press.
+                bool firstPress = _pressedKeys.OnKeyDown(vkCode);
+                if (firstPress && !SuppressAll)
                 {
-                    Log.Debug("Hotkey triggered: {Action} (VK={Key})", entry.action, vkCode);
-                    entry.callback();
+                    int modifiers = ReadCurrentModifiers() & ~ModifierForKey(vkCode);
+                    var snapshot = _bindings;
+                    if (snapshot.TryGetValue((vkCode, modifiers), out var entries))
+                    {
+                        foreach (var entry in entries)
+                        {
+                            try
+                            {
+                                Log.Debug("Hotkey triggered: {Action} (VK={Key})", entry.action, vkCode);
+                                entry.callback();
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Error(ex, "Hotkey action failed: {Action}", entry.action);
+                            }
+                        }
+                    }
                 }
-                return CallNextHookEx(_hookId, nCode, wParam, lParam);
-            }
-            else if (_bindings.Count > 0)
-            {
-                Log.Debug("KeyDown VK=0x{Vk:X} ({Vk}) ignored — no matching binding (bindings={Count})",
-                    vkCode, vkCode, _bindings.Count);
             }
         }
-        return CallNextHookEx(_hookId, nCode, wParam, lParam);
-    }
-
-    /// <summary>
-    /// Returns true if this virtual key hasn't been triggered within the dedup window.
-    /// Prevents the low-level hook from double-firing.
-    /// </summary>
-    private bool TryAcquireTriggerSlot((int Vk, int Modifiers) chord)
-    {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        lock (_lastTriggerTick)
+        catch (Exception ex)
         {
-            if (_lastTriggerTick.TryGetValue(chord, out var last) && (now - last) < DedupWindowMs)
-                return false;
-            _lastTriggerTick[chord] = now;
+            // Never allow exceptions to cross a native keyboard-hook boundary.
+            Log.Error(ex, "Low-level keyboard hook processing failed");
         }
-        return true;
+
+        // Let key events reach the game and the key-binding dialog.
+        return CallNextHookEx(_hookId, nCode, wParam, lParam);
     }
 
     public void Dispose()
@@ -145,7 +141,7 @@ public class HotkeyService : IDisposable
         if (_disposed) return;
         _disposed = true;
         Stop();
-        _bindings.Clear();
+        _bindings = new();
     }
 
     // ── Modifier support (stored as Ctrl=1, Alt=2, Shift=4, Win=8) ──
@@ -238,6 +234,8 @@ public class HotkeyService : IDisposable
     private const int WH_KEYBOARD_LL = 13;
     private static readonly IntPtr WM_KEYDOWN = (IntPtr)0x0100;
     private static readonly IntPtr WM_SYSKEYDOWN = (IntPtr)0x0104;
+    private static readonly IntPtr WM_KEYUP = (IntPtr)0x0101;
+    private static readonly IntPtr WM_SYSKEYUP = (IntPtr)0x0105;
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
