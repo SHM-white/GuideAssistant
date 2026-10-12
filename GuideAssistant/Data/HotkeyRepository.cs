@@ -15,7 +15,7 @@ public class HotkeyRepository
     public List<HotkeyProfile> GetAllProfiles()
     {
         using var conn = _db.CreateConnection();
-        var profiles = conn.Query<HotkeyProfile>("SELECT id AS Id, name AS Name, game_id AS GameId, is_default AS IsDefault FROM hotkey_profiles ORDER BY is_default DESC, name").ToList();
+        var profiles = conn.Query<HotkeyProfile>("SELECT id AS Id, name AS Name, game_id AS GameId, game_config_id AS GameConfigId, is_default AS IsDefault FROM hotkey_profiles ORDER BY is_default DESC, name").ToList();
         foreach (var p in profiles)
         {
             p.Bindings = conn.Query<HotkeyBinding>("SELECT id AS Id, profile_id AS ProfileId, action_name AS ActionName, action_display AS ActionDisplay, modifiers AS Modifiers, virtual_key AS VirtualKey, display_text AS DisplayText FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = p.Id }).ToList();
@@ -30,13 +30,49 @@ public class HotkeyRepository
             return cached;
 
         using var conn = _db.CreateConnection();
-        var profile = conn.QueryFirstOrDefault<HotkeyProfile>("SELECT id AS Id, name AS Name, game_id AS GameId, is_default AS IsDefault FROM hotkey_profiles WHERE is_default=1");
+        var profile = conn.QueryFirstOrDefault<HotkeyProfile>("SELECT id AS Id, name AS Name, game_id AS GameId, game_config_id AS GameConfigId, is_default AS IsDefault FROM hotkey_profiles WHERE is_default=1");
         if (profile != null)
         {
             profile.Bindings = conn.Query<HotkeyBinding>("SELECT id AS Id, profile_id AS ProfileId, action_name AS ActionName, action_display AS ActionDisplay, modifiers AS Modifiers, virtual_key AS VirtualKey, display_text AS DisplayText FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''", new { id = profile.Id }).ToList();
             _profileCache[0] = profile;
         }
         return profile;
+    }
+
+    /// <summary>A game has at most one dedicated profile; absent bindings inherit defaults.</summary>
+    public HotkeyProfile? GetGameProfile(int gameConfigId)
+    {
+        using var conn = _db.CreateConnection();
+        var profile = conn.QueryFirstOrDefault<HotkeyProfile>(
+            "SELECT id AS Id, name AS Name, game_id AS GameId, game_config_id AS GameConfigId, is_default AS IsDefault FROM hotkey_profiles WHERE game_config_id=@id",
+            new { id = gameConfigId });
+        if (profile != null)
+            profile.Bindings = conn.Query<HotkeyBinding>(
+                "SELECT id AS Id, profile_id AS ProfileId, action_name AS ActionName, action_display AS ActionDisplay, modifiers AS Modifiers, virtual_key AS VirtualKey, display_text AS DisplayText FROM hotkey_bindings WHERE profile_id=@id AND action_name != ''",
+                new { id = profile.Id }).ToList();
+        return profile;
+    }
+
+    public HotkeyProfile GetOrCreateGameProfile(int gameConfigId, string gameName)
+    {
+        using (var conn = _db.CreateConnection())
+        {
+            conn.Execute(@"INSERT OR IGNORE INTO hotkey_profiles(name, game_config_id, is_default)
+                VALUES (@name, @id, 0)", new { name = gameName + " 专属方案", id = gameConfigId });
+        }
+        return GetGameProfile(gameConfigId)
+            ?? throw new InvalidOperationException("Failed to create game-specific hotkey profile.");
+    }
+
+    public void DeleteGameProfile(int gameConfigId)
+    {
+        using var conn = _db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        conn.Execute(@"DELETE FROM hotkey_bindings WHERE profile_id IN
+            (SELECT id FROM hotkey_profiles WHERE game_config_id=@id)", new { id = gameConfigId }, tx);
+        conn.Execute("DELETE FROM hotkey_profiles WHERE game_config_id=@id", new { id = gameConfigId }, tx);
+        tx.Commit();
+        InvalidateCache();
     }
 
     public int AddProfile(HotkeyProfile p)
