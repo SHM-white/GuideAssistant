@@ -115,6 +115,7 @@ public class Database
         // One-time rebuild of bookmarks table
         RebuildBookmarksIfNeeded(conn);
         EnsureGameHotkeyProfiles(conn);
+        EnsureBookmarkGameConfigs(conn);
 
         Log.Information("Database initialized");
     }
@@ -149,7 +150,7 @@ public class Database
         using var versionCmd = conn.CreateCommand();
         versionCmd.CommandText = "SELECT value FROM settings WHERE key = 'db_version'";
         var currentVersion = versionCmd.ExecuteScalar() as string;
-        if (int.TryParse(currentVersion, out var version) && version > 4)
+        if (int.TryParse(currentVersion, out var version) && version > 5)
         {
             Log.Warning("Database version {Version} is newer than this application", version);
             return;
@@ -163,7 +164,7 @@ public class Database
             if (string.Equals(reader.GetString(1), "folder_id", StringComparison.OrdinalIgnoreCase))
                 hasFolderId = true;
         reader.Close();
-        if ((currentVersion == "3" || currentVersion == "4") && hasFolderId) return;
+        if (version >= 3 && hasFolderId) return;
 
         // Never drop a user's existing bookmarks, even if version metadata is missing.
         using var countCmd = conn.CreateCommand();
@@ -194,5 +195,47 @@ public class Database
         update.ExecuteNonQuery();
         tx.Commit();
         Log.Information("Database upgraded to version 3 without deleting bookmarks");
+    }
+
+    private static void EnsureBookmarkGameConfigs(SqliteConnection conn)
+    {
+        using var columns = conn.CreateCommand();
+        columns.CommandText = "PRAGMA table_info(bookmarks)";
+        using var reader = columns.ExecuteReader();
+        bool hasColumn = false;
+        while (reader.Read())
+            hasColumn |= reader.GetString(1) == "game_config_id";
+        reader.Close();
+        if (hasColumn) return;
+
+        // Preserve a recoverable copy before changing existing game associations.
+        var backupPath = conn.DataSource + ".pre-v5.bak";
+        if (!File.Exists(backupPath))
+        {
+            using var backup = new SqliteConnection($"Data Source={backupPath}");
+            backup.Open();
+            conn.BackupDatabase(backup);
+        }
+
+        using var tx = conn.BeginTransaction();
+        using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"
+            ALTER TABLE bookmarks ADD COLUMN game_config_id INTEGER REFERENCES game_configs(id) ON DELETE SET NULL;
+            UPDATE bookmarks SET game_config_id = (
+                SELECT c.id FROM game_configs c JOIN games g ON c.game_name = g.name
+                WHERE g.id = bookmarks.game_id
+                GROUP BY g.id HAVING COUNT(*) = 1
+            ) WHERE game_id IN (SELECT id FROM games);
+            UPDATE bookmarks SET game_config_id = game_id
+                WHERE game_id NOT IN (SELECT id FROM games)
+                AND game_id IN (SELECT id FROM game_configs);
+            UPDATE bookmarks SET game_id = NULL WHERE game_config_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_bookmarks_game_config ON bookmarks(game_config_id);
+            INSERT INTO settings(key, value) VALUES('db_version', '5')
+                ON CONFLICT(key) DO UPDATE SET value='5' WHERE CAST(settings.value AS INTEGER) < 5;";
+        cmd.ExecuteNonQuery();
+        tx.Commit();
+        Log.Information("Database upgraded to version 5 with game-specific bookmarks");
     }
 }

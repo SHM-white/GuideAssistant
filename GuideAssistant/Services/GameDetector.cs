@@ -21,6 +21,11 @@ public class GameDetector : IDisposable
     /// Gets the game name currently in the foreground, or null if no tracked game is active.
     /// </summary>
     public string? CurrentForegroundGameName { get; private set; }
+    private GameConfig? _bookmarkGame;
+
+    // Retain the last foreground game while it is running, including when the
+    // user gives the toolbar focus to save a bookmark. Hotkeys still use focus.
+    public int? BookmarkGameConfigId => Volatile.Read(ref _bookmarkGame)?.Id;
 
     /// <summary>
     /// Raised on the process scanner's background timer. Subscribers owning
@@ -57,6 +62,7 @@ public class GameDetector : IDisposable
         _activeGames.Clear();
         CurrentForegroundGameName = null;
         _foregroundGameConfigId = null;
+        Volatile.Write(ref _bookmarkGame, null);
     }
 
     public void ReloadConfigs()
@@ -75,6 +81,7 @@ public class GameDetector : IDisposable
             if (hwnd != IntPtr.Zero) GetWindowThreadProcessId(hwnd, out foregroundPid);
             var foregroundProcess = foregroundPid == 0 ? "" : GetProcessName((int)foregroundPid);
             GameConfig? focusedGame = null;
+            var runningGameIds = new HashSet<int>();
 
             foreach (var config in _configs)
             {
@@ -95,6 +102,7 @@ public class GameDetector : IDisposable
                     continue;
                 }
 
+                if (running) runningGameIds.Add(config.Id);
                 if (running && _activeGames.Add(config.GameName))
                 {
                     _launcher.LaunchHelper(config);
@@ -112,6 +120,9 @@ public class GameDetector : IDisposable
                     focusedGame = config;
             }
             CurrentForegroundGameName = focusedGame?.GameName;
+            var bookmarkGame = Volatile.Read(ref _bookmarkGame);
+            Volatile.Write(ref _bookmarkGame, focusedGame ??
+                (bookmarkGame != null && runningGameIds.Contains(bookmarkGame.Id) ? bookmarkGame : null));
             if (_foregroundGameConfigId != focusedGame?.Id)
             {
                 _foregroundGameConfigId = focusedGame?.Id;

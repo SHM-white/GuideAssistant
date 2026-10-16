@@ -161,7 +161,7 @@ public partial class MainViewModel : ObservableObject
         if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(title)) return;
         if (_bookmarkService.IsUrlBookmarked(url)) return;
         int? gameId = ResolveForegroundGameId();
-        _bookmarkService.QuickAdd(title, url, gameId: gameId);
+        _bookmarkService.QuickAdd(title, url, gameConfigId: gameId);
         IsCurrentUrlBookmarked = true;
         WeakReferenceMessenger.Default.Send(new BookmarksChangedMessage());
     }
@@ -256,10 +256,7 @@ public partial class MainViewModel : ObservableObject
 
     private int? ResolveForegroundGameId()
     {
-        var gameName = _gameDetector.CurrentForegroundGameName;
-        if (string.IsNullOrEmpty(gameName)) return null;
-        var games = _bookmarkService.GetAllGames();
-        return games.FirstOrDefault(g => string.Equals(g.GameName, gameName, StringComparison.OrdinalIgnoreCase))?.Id;
+        return _gameDetector.BookmarkGameConfigId;
     }
 }
 

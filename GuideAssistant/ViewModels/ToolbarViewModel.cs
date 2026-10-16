@@ -128,8 +128,8 @@ public partial class ToolbarViewModel : ObservableObject
     {
         if (tab == null || _bookmarkService.IsUrlBookmarked(tab.Url)) return;
         int? gameId = ResolveForegroundGameId();
-        _bookmarkService.QuickAdd(tab.Title, tab.Url, gameId: gameId);
-        IsCurrentBookmarked = true;
+        _bookmarkService.QuickAdd(tab.Title, tab.Url, gameConfigId: gameId);
+        IsCurrentBookmarked = _bookmarkService.IsUrlBookmarked(_tabManager.ActiveTab?.Url ?? "");
         BookmarkChanged?.Invoke();
     }
 
@@ -139,7 +139,7 @@ public partial class ToolbarViewModel : ObservableObject
         if (string.IsNullOrEmpty(url) || _bookmarkService.IsUrlBookmarked(url)) return;
         var title = _tabManager.ActiveTab?.Title ?? url;
         int? gameId = ResolveForegroundGameId();
-        _bookmarkService.QuickAdd(title, url, gameId: gameId);
+        _bookmarkService.QuickAdd(title, url, gameConfigId: gameId);
         IsCurrentBookmarked = true;
         BookmarkChanged?.Invoke();
     }
@@ -160,9 +160,6 @@ public partial class ToolbarViewModel : ObservableObject
 
     private int? ResolveForegroundGameId()
     {
-        var gameName = _gameDetector.CurrentForegroundGameName;
-        if (string.IsNullOrEmpty(gameName)) return null;
-        var games = _bookmarkService.GetAllGames();
-        return games.FirstOrDefault(g => string.Equals(g.GameName, gameName, StringComparison.OrdinalIgnoreCase))?.Id;
+        return _gameDetector.BookmarkGameConfigId;
     }
 }

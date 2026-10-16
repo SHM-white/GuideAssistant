@@ -403,7 +403,8 @@ public sealed partial class MainWindow : Window
             var timeLabel = BilibiliMomentLink.FormatTime(second);
             var title = string.IsNullOrWhiteSpace(active.Title) || active.Title == "新标签页"
                 ? "B站攻略" : active.Title;
-            _bookmarkService.QuickAdd($"{title} [{timeLabel}]", markedUrl, tags: "视频时间点");
+            _bookmarkService.QuickAdd($"{title} [{timeLabel}]", markedUrl, tags: "视频时间点",
+                gameConfigId: _gameDetector.BookmarkGameConfigId);
             return $"已收藏 {timeLabel}，从右侧收藏夹点击跳转";
         }
         catch (Exception ex)

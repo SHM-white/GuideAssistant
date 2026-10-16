@@ -172,6 +172,8 @@ public sealed partial class ToolbarWindow : Window
                 NavBarControl.SetUrl(_viewModel.UrlBarText);
                 NavBarControl.SetBookmarkState(_viewModel.IsCurrentBookmarked);
             }
+            else if (e.PropertyName == nameof(ToolbarViewModel.IsCurrentBookmarked))
+                NavBarControl.SetBookmarkState(_viewModel.IsCurrentBookmarked);
         };
 
         if (_tabManager.ActiveTab != null)
@@ -207,6 +209,40 @@ public sealed partial class ToolbarWindow : Window
                 searchFolder.Children.Add(CreateBookmarkNode(bm));
             }
             _bookmarkRootNodes.Add(searchFolder);
+        }
+        else if (BookmarkGrouping.SelectedIndex == 0)
+        {
+            var gameNodes = new Dictionary<int, BookmarkTreeNode>();
+            foreach (var game in _bookmarkService.GetAllGames())
+            {
+                var node = new BookmarkTreeNode { IconGlyph = "\uE7FC", Label = game.GameName, IsFolder = true };
+                gameNodes[game.Id] = node;
+                _bookmarkRootNodes.Add(node);
+            }
+
+            var general = new BookmarkTreeNode { IconGlyph = "\uE8B7", Label = "通用收藏", IsFolder = true };
+            var legacyNodes = new Dictionary<int, BookmarkTreeNode>();
+            foreach (var bm in allBookmarks)
+            {
+                BookmarkTreeNode target;
+                if (bm.GameConfigId is int gameId && gameNodes.TryGetValue(gameId, out var gameNode))
+                    target = gameNode;
+                else if (bm.GameId is int legacyId && !string.IsNullOrEmpty(bm.GameName))
+                {
+                    if (!legacyNodes.TryGetValue(legacyId, out var legacyNode))
+                    {
+                        legacyNode = new BookmarkTreeNode { IconGlyph = "\uE8B7", Label = bm.GameName + "（历史游戏）", IsFolder = true };
+                        legacyNodes[legacyId] = legacyNode;
+                        _bookmarkRootNodes.Add(legacyNode);
+                    }
+                    target = legacyNode;
+                }
+                else target = general;
+                target.Children.Add(CreateBookmarkNode(bm));
+            }
+            _bookmarkRootNodes.Add(general);
+            foreach (var node in _bookmarkRootNodes)
+                node.Label = $"{node.Label}  ({node.Children.Count})";
         }
         else
         {
@@ -259,7 +295,8 @@ public sealed partial class ToolbarWindow : Window
         {
             IconGlyph = "\uE7F4",
             Label = bm.Title,
-            SubLabel = bm.Url,
+            SubLabel = string.Join(" · ", new[] { bm.GameName, bm.Tags, bm.Url }
+                .Where(value => !string.IsNullOrWhiteSpace(value))),
             Bookmark = bm
         };
     }
@@ -267,7 +304,17 @@ public sealed partial class ToolbarWindow : Window
     private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
         _viewModel.SearchBookmarksCommand.Execute(args.QueryText);
-        RefreshBookmarksPanel();
+    }
+
+    private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (_viewModel != null && args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+            _viewModel.SearchBookmarksCommand.Execute(sender.Text);
+    }
+
+    private void BookmarkGrouping_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_viewModel != null) RefreshBookmarksPanel();
     }
 
     private void BookmarksTreeView_ItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
@@ -311,7 +358,7 @@ public sealed partial class ToolbarWindow : Window
         var node = FindTreeViewNode(e.OriginalSource as DependencyObject);
         if (node == null) return;
 
-        if (node.IsFolder)
+        if (node.IsFolder && node.FolderId > 0)
             ShowFolderMenu(node, (FrameworkElement)sender, e.GetPosition((FrameworkElement)sender));
         else if (node.Bookmark != null)
             ShowBookmarkMenu(node, (FrameworkElement)sender, e.GetPosition((FrameworkElement)sender));
@@ -319,6 +366,8 @@ public sealed partial class ToolbarWindow : Window
 
     private void ShowFolderMenu(BookmarkTreeNode folderNode, FrameworkElement target, Windows.Foundation.Point offset)
     {
+        var folder = _bookmarkService.GetAllFolders().FirstOrDefault(f => f.Id == folderNode.FolderId);
+        if (folder == null) return;
         var menu = new MenuFlyout();
 
         var renameItem = new MenuFlyoutItem { Text = "重命名" };
@@ -330,7 +379,7 @@ public sealed partial class ToolbarWindow : Window
                 PrimaryButtonText = "确定",
                 CloseButtonText = "取消",
                 DefaultButton = ContentDialogButton.Primary,
-                Content = new TextBox { Text = folderNode.Label },
+                Content = new TextBox { Text = folder.Name },
                 XamlRoot = Content.XamlRoot
             };
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
@@ -359,6 +408,9 @@ public sealed partial class ToolbarWindow : Window
     private void ShowBookmarkMenu(BookmarkTreeNode bookmarkNode, FrameworkElement target, Windows.Foundation.Point offset)
     {
         var menu = new MenuFlyout();
+        var editItem = new MenuFlyoutItem { Text = "编辑收藏" };
+        editItem.Click += async (s, args) => await EditBookmarkAsync(bookmarkNode.Bookmark!);
+        menu.Items.Add(editItem);
 
         // Move to folder submenu
         var moveSubMenu = new MenuFlyoutSubItem { Text = "移动到..." };
@@ -400,6 +452,71 @@ public sealed partial class ToolbarWindow : Window
         menu.Items.Add(deleteItem);
 
         menu.ShowAt(target, offset);
+    }
+
+    private sealed record BookmarkChoice(int? Id, string Name);
+
+    private async Task EditBookmarkAsync(Bookmark bookmark)
+    {
+        var titleBox = new TextBox { Header = "标题", Text = bookmark.Title };
+        var tagsBox = new TextBox { Header = "标签", PlaceholderText = "例如：Boss、收集、支线", Text = bookmark.Tags ?? "" };
+        var notesBox = new TextBox { Header = "备注", Text = bookmark.Notes ?? "", AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MaxHeight = 120 };
+        var games = new List<BookmarkChoice> { new(null, "通用收藏") };
+        games.AddRange(_bookmarkService.GetAllGames().Select(g => new BookmarkChoice(g.Id, g.GameName)));
+        // Keep unmapped historical associations until the user explicitly changes them.
+        if (bookmark.GameId != null && bookmark.GameConfigId == null)
+            games.Add(new(-1, bookmark.GameName ?? "历史游戏"));
+        var gameBox = new ComboBox { Header = "所属游戏", ItemsSource = games, DisplayMemberPath = "Name",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            SelectedItem = games.FirstOrDefault(g => g.Id == (bookmark.GameConfigId ?? (bookmark.GameId != null ? -1 : null))) ?? games[0] };
+        var folders = new List<BookmarkChoice> { new(null, "未分类") };
+        folders.AddRange(_bookmarkService.GetAllFolders().Select(f => new BookmarkChoice(f.Id, f.Name)));
+        var folderBox = new ComboBox { Header = "文件夹", ItemsSource = folders, DisplayMemberPath = "Name",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            SelectedItem = folders.FirstOrDefault(f => f.Id == bookmark.FolderId) ?? folders[0] };
+        var errorText = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var dialog = new ContentDialog
+        {
+            Title = "编辑收藏", PrimaryButtonText = "保存", CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot,
+            Content = new ScrollViewer
+            {
+                MaxHeight = 420,
+                Content = new StackPanel { Spacing = 10, Children = { titleBox, gameBox, folderBox, tagsBox, notesBox, errorText } }
+            }
+        };
+        dialog.PrimaryButtonClick += (s, args) =>
+        {
+            if (string.IsNullOrWhiteSpace(titleBox.Text))
+            {
+                errorText.Text = "请输入收藏标题。";
+                args.Cancel = true;
+            }
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        var selectedGameId = (gameBox.SelectedItem as BookmarkChoice)?.Id;
+        bookmark.Title = titleBox.Text.Trim();
+        bookmark.Tags = tagsBox.Text.Trim();
+        bookmark.Notes = notesBox.Text.Trim();
+        if (selectedGameId != -1)
+        {
+            bookmark.GameId = null;
+            bookmark.GameConfigId = selectedGameId;
+        }
+        bookmark.FolderId = (folderBox.SelectedItem as BookmarkChoice)?.Id;
+        try
+        {
+            _bookmarkService.Update(bookmark);
+            MomentStatusText.Text = "收藏已保存";
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Bookmark edit failed");
+            MomentStatusText.Text = "收藏保存失败，请重试";
+            RefreshBookmarksPanel();
+        }
     }
 
     private static BookmarkTreeNode? FindTreeViewNode(DependencyObject? element)

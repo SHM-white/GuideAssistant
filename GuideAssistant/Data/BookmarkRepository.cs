@@ -12,9 +12,10 @@ public class BookmarkRepository
     {
         using var conn = _db.CreateConnection();
         return conn.Query<Bookmark>(@"
-            SELECT b.*, g.name AS GameName
+            SELECT b.*, COALESCE(c.game_name, g.name) AS GameName
             FROM bookmarks b
             LEFT JOIN games g ON b.game_id = g.id
+            LEFT JOIN game_configs c ON b.game_config_id = c.id
             ORDER BY b.created_at DESC").ToList();
     }
 
@@ -22,7 +23,7 @@ public class BookmarkRepository
     {
         using var conn = _db.CreateConnection();
         return conn.Query<Bookmark>(
-            "SELECT b.*, g.name AS GameName FROM bookmarks b LEFT JOIN games g ON b.game_id = g.id WHERE b.game_id = @id ORDER BY b.created_at DESC",
+            "SELECT b.*, c.game_name AS GameName FROM bookmarks b LEFT JOIN game_configs c ON b.game_config_id = c.id WHERE b.game_config_id = @id ORDER BY b.created_at DESC",
             new { id = gameId }).ToList();
     }
 
@@ -30,25 +31,28 @@ public class BookmarkRepository
     {
         using var conn = _db.CreateConnection();
         return conn.Query<Bookmark>(@"
-            SELECT b.*, g.name AS GameName FROM bookmarks b
+            SELECT b.*, COALESCE(c.game_name, g.name) AS GameName FROM bookmarks b
             LEFT JOIN games g ON b.game_id = g.id
-            WHERE b.title LIKE @k OR b.url LIKE @k OR b.tags LIKE @k
-            ORDER BY b.created_at DESC", new { k = $"%{keyword}%" }).ToList();
+            LEFT JOIN game_configs c ON b.game_config_id = c.id
+            WHERE b.title LIKE @k ESCAPE '\' OR b.url LIKE @k ESCAPE '\'
+               OR b.tags LIKE @k ESCAPE '\' OR b.notes LIKE @k ESCAPE '\'
+               OR COALESCE(c.game_name, g.name) LIKE @k ESCAPE '\'
+            ORDER BY b.created_at DESC", new { k = $"%{keyword.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_")}%" }).ToList();
     }
 
     public int Add(Bookmark b)
     {
         using var conn = _db.CreateConnection();
         return conn.ExecuteScalar<int>(@"
-            INSERT INTO bookmarks (game_id, folder_id, title, url, favicon_url, tags, notes, is_favorite, created_at, updated_at)
-            VALUES (@GameId, @FolderId, @Title, @Url, @FaviconUrl, @Tags, @Notes, @IsFavorite, @CreatedAt, @UpdatedAt);
+            INSERT INTO bookmarks (game_id, game_config_id, folder_id, title, url, favicon_url, tags, notes, is_favorite, created_at, updated_at)
+            VALUES (@GameId, @GameConfigId, @FolderId, @Title, @Url, @FaviconUrl, @Tags, @Notes, @IsFavorite, @CreatedAt, @UpdatedAt);
             SELECT last_insert_rowid();", b);
     }
 
     public void Update(Bookmark b)
     {
         using var conn = _db.CreateConnection();
-        conn.Execute("UPDATE bookmarks SET title=@Title, tags=@Tags, notes=@Notes, game_id=@GameId, folder_id=@FolderId, updated_at=@UpdatedAt WHERE id=@Id", b);
+        conn.Execute("UPDATE bookmarks SET title=@Title, tags=@Tags, notes=@Notes, game_id=@GameId, game_config_id=@GameConfigId, folder_id=@FolderId, updated_at=@UpdatedAt WHERE id=@Id", b);
     }
 
     public void Delete(int id)
@@ -103,6 +107,7 @@ public class GameRepository
 {
     private readonly Database _db;
     public GameRepository(Database db) => _db = db;
+    public event Action? GamesChanged;
 
     public List<GameConfig> GetAll()
     {
@@ -113,21 +118,28 @@ public class GameRepository
     public int Add(GameConfig g)
     {
         using var conn = _db.CreateConnection();
-        return conn.ExecuteScalar<int>(@"
+        var id = conn.ExecuteScalar<int>(@"
             INSERT INTO game_configs (game_name, game_path, helper_path, launch_args, auto_detect)
             VALUES (@GameName, @GamePath, @HelperPath, @LaunchArgs, @AutoDetect);
             SELECT last_insert_rowid();", g);
+        GamesChanged?.Invoke();
+        return id;
     }
 
     public void Update(GameConfig g)
     {
         using var conn = _db.CreateConnection();
         conn.Execute("UPDATE game_configs SET game_name=@GameName, game_path=@GamePath, helper_path=@HelperPath, launch_args=@LaunchArgs, auto_detect=@AutoDetect WHERE id=@Id", g);
+        GamesChanged?.Invoke();
     }
 
     public void Delete(int id)
     {
         using var conn = _db.CreateConnection();
-        conn.Execute("DELETE FROM game_configs WHERE id=@id", new { id });
+        using var tx = conn.BeginTransaction();
+        conn.Execute("UPDATE bookmarks SET game_config_id=NULL WHERE game_config_id=@id", new { id }, tx);
+        conn.Execute("DELETE FROM game_configs WHERE id=@id", new { id }, tx);
+        tx.Commit();
+        GamesChanged?.Invoke();
     }
 }

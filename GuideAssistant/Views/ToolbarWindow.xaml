@@ -127,6 +127,7 @@
                     <AutoSuggestBox x:Name="SearchBox" Grid.Column="1"
                                     PlaceholderText="搜索..."
                                     Width="160" Height="28" FontSize="12"
+                                    TextChanged="SearchBox_TextChanged"
                                     QuerySubmitted="SearchBox_QuerySubmitted" />
                     <Button x:Name="SaveMomentButton" Grid.Column="2" Height="28" Padding="8,0"
                             Background="Transparent" BorderThickness="0"
@@ -145,8 +146,16 @@
                     </Button>
                 </Grid>
 
-                <TextBlock x:Name="MomentStatusText" Grid.Row="1" Margin="10,0,10,4"
-                           FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                <StackPanel Grid.Row="1" Margin="10,0,10,4" Spacing="4">
+                    <ComboBox x:Name="BookmarkGrouping" SelectedIndex="0"
+                              AutomationProperties.Name="收藏分组方式"
+                              SelectionChanged="BookmarkGrouping_SelectionChanged">
+                        <ComboBoxItem Content="按游戏分组" />
+                        <ComboBoxItem Content="按文件夹分组" />
+                    </ComboBox>
+                    <TextBlock x:Name="MomentStatusText"
+                               FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                </StackPanel>
                 <TreeView x:Name="BookmarksTreeView" Grid.Row="2"
                            Margin="4,0,4,4"
                            SelectionMode="Single"

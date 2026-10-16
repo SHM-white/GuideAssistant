@@ -17,6 +17,7 @@ public class BookmarkService
         _repo = repo;
         _folderRepo = folderRepo;
         _gameRepo = gameRepo;
+        _gameRepo.GamesChanged += () => BookmarksChanged?.Invoke();
     }
 
     public List<Bookmark> GetAll() => _repo.GetAll();
@@ -28,7 +29,12 @@ public class BookmarkService
         BookmarksChanged?.Invoke();
         return id;
     }
-    public void Update(Bookmark b) => _repo.Update(b);
+    public void Update(Bookmark b)
+    {
+        b.UpdatedAt = DateTime.Now;
+        _repo.Update(b);
+        BookmarksChanged?.Invoke();
+    }
     public void Delete(int id)
     {
         _repo.Delete(id);
@@ -42,7 +48,7 @@ public class BookmarkService
         return _repo.GetAll().Any(b => b.Url == url);
     }
 
-    public int QuickAdd(string title, string url, string? tags = null, int? gameId = null)
+    public int QuickAdd(string title, string url, string? tags = null, int? gameConfigId = null)
     {
         // Fall back to URL if title is empty or just a placeholder
         if (string.IsNullOrWhiteSpace(title) || title == "新标签页")
@@ -53,7 +59,7 @@ public class BookmarkService
             Title = title,
             Url = url,
             Tags = tags,
-            GameId = gameId,
+            GameConfigId = _gameRepo.GetAll().Any(g => g.Id == gameConfigId) ? gameConfigId : null,
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now
         };
